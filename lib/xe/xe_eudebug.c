@@ -149,6 +149,8 @@ static const char *type_to_str(unsigned int type)
 		return "vm_bind_op_metadata";
 	case DRM_XE_EUDEBUG_EVENT_PAGEFAULT:
 		return "pagefault";
+	case DRM_XE_EUDEBUG_EVENT_SYNC_HOST:
+		return "sync_host";
 	}
 
 	return "UNKNOWN";
@@ -255,6 +257,13 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
 			"lrc_handle=%llu, bitmask_size=%d, pagefault_address=0x%llx",
 			pf->client_handle, pf->exec_queue_handle, pf->lrc_handle,
 			pf->bitmask_size, pf->pagefault_address);
+		break;
+	}
+	case DRM_XE_EUDEBUG_EVENT_SYNC_HOST: {
+		struct drm_xe_eudebug_event_sync_host *es = (void *)e;
+
+		sprintf(buf, "client_handle=%llu, exec_queue_handle=%llu, lrc_handle=%llu",
+			es->client_handle, es->exec_queue_handle, es->lrc_handle);
 		break;
 	}
 	default:
