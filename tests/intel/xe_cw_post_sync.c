@@ -152,7 +152,7 @@ static void *thread1_fn(void *arg)
 		     PIPELINE_SELECT_GPGPU);
 
 	xe3p_emit_state_base_address(ibb);
-	xehp_emit_state_compute_mode(ibb, shader1->vrt != VRT_DISABLED);
+	xehp_emit_state_compute_mode(ibb, shader1->vrt != VRT_DISABLED, 0);
 
 	inline_data1 = intel_bb_ptr(ibb) + 4 * 32;
 	width = w_dim.x * 16;
@@ -167,7 +167,7 @@ static void *thread1_fn(void *arg)
 			 xe_canonical_va(t_data->fd, short_buf->addr.offset),
 			 short_buf, w_dim.x);
 
-	xehp_emit_state_compute_mode(ibb, shader2->vrt != VRT_DISABLED);
+	xehp_emit_state_compute_mode(ibb, shader2->vrt != VRT_DISABLED, 0);
 	inline_data2 = intel_bb_ptr(ibb) + 4 * 32;
 	xe3p_emit_compute_walk2(ibb, 0, 0, width, w_dim.y, &idd2,
 				w_dim.x * w_dim.y, NULL);
