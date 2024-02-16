@@ -33,6 +33,7 @@ struct gpgpu_shader {
 		uint32_t (*instr)[4];
 	};
 	struct igt_map *labels;
+	uint32_t exceptions;
 	bool illegal_opcode_exception_enable;
 	uint32_t num_threads_in_tg;
 	bool large_grf_mode;

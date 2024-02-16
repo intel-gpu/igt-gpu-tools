@@ -187,7 +187,7 @@ __xehp_gpgpu_execfunc(struct intel_bb *ibb,
 	intel_bb_out(ibb, GEN7_PIPELINE_SELECT | GEN9_PIPELINE_SELECTION_MASK |
 		     PIPELINE_SELECT_GPGPU);
 	xehp_emit_state_base_address(ibb);
-	xehp_emit_state_compute_mode(ibb, shdr->vrt != VRT_DISABLED);
+	xehp_emit_state_compute_mode(ibb, shdr->vrt != VRT_DISABLED, 0);
 	xehp_emit_state_binding_table_pool_alloc(ibb);
 	xehp_emit_cfe_state(ibb, xe_query_eu_thread_count(ibb->fd, 0));
 
@@ -234,7 +234,7 @@ __xe3p_gpgpu_execfunc(struct intel_bb *ibb,
 	intel_bb_out(ibb, GEN7_PIPELINE_SELECT | GEN9_PIPELINE_SELECTION_MASK |
 		     PIPELINE_SELECT_GPGPU);
 	xe3p_emit_state_base_address(ibb);
-	xehp_emit_state_compute_mode(ibb, shdr->vrt != VRT_DISABLED);
+	xehp_emit_state_compute_mode(ibb, shdr->vrt != VRT_DISABLED, shdr->exceptions);
 
 	if (sip_offset) {
 		struct drm_i915_gem_exec_object2 *object =
@@ -339,6 +339,7 @@ struct gpgpu_shader *gpgpu_shader_create(int fd)
 	shdr->simd_size = 16;  /* Default SIMD size */
 	shdr->hw_local_id_generation = false;
 	shdr->vrt = VRT_DISABLED;
+	shdr->exceptions = 0xffff0000;
 	igt_assert(shdr->code);
 
 	return shdr;
