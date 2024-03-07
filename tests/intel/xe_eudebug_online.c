@@ -245,6 +245,16 @@ static int caching_get_instruction_count(int fd, uint32_t s_dim__x, uint64_t fla
 	return (2 * xe_min_page_size(fd, memory)) / s_dim__x;
 }
 
+static bool intel_gen_per_context_eudebug(int fd)
+{
+	const uint32_t id = intel_get_drm_devid(fd);
+
+	return intel_gen(id) >= 35;
+}
+
+#define STATE_COMPUTE_MODE_ENABLE_FE_FEH	BIT(15)
+#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS	BIT(14)
+
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
 	struct dim_t w_dim = walker_dimensions(data->thread_count);
@@ -260,6 +270,14 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 
 	if (data->flags & PAGEFAULT_STRESS_TEST)
 		shader->num_threads_in_tg = gpgpu_shader__get_max_threads_in_tg(shader);
+
+	if (intel_gen_per_context_eudebug(data->drm_fd)) {
+		if (data->flags & (SHADER_BREAKPOINT | TRIGGER_RESUME_SET_BP | SHADER_SINGLE_STEP |
+				    SHADER_N_NOOP_BREAKPOINT))
+			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
+		if (data->flags & SHADER_LOOP)
+			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
+	}
 
 	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 	if (data->flags & SHADER_BREAKPOINT) {
@@ -385,6 +403,8 @@ static const char *td_ctl_cmd_to_str(uint32_t cmd)
 		return "stopped";
 	case DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME:
 		return "resume";
+	case DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK:
+		return "unlock";
 	default:
 		return "unknown command";
 	}
@@ -477,6 +497,13 @@ static inline uint64_t eu_ctl_interrupt_all(int debugfd, uint64_t client,
 		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
 }
 
+static inline uint64_t eu_ctl_unlock(int debugfd, uint64_t client,
+				     uint64_t exec_queue, uint64_t lrc)
+{
+	return eu_ctl(debugfd, client, exec_queue, lrc, NULL, 0,
+		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK);
+}
+
 static struct online_debug_data *
 online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
@@ -553,6 +580,18 @@ static void eu_attention_debug_trigger(struct xe_eudebug_debugger *d,
 	for (uint32_t i = 0; i < att->bitmask_size / 4; i += 2)
 		igt_debug("bitmask[%d] = 0x%08x%08x\n", i / 2, ptr[i], ptr[i + 1]);
 }
+
+static void sync_host_debug_trigger(struct xe_eudebug_debugger *d,
+				    struct drm_xe_eudebug_event *e)
+{
+	struct drm_xe_eudebug_event_sync_host *s = (void *) e;
+
+	igt_debug("EVENT[%llu] sync-host; client[%llu], exec_queue[%llu], "
+		  "lrc[%llu]\n", s->base.seqno,
+		  s->client_handle, s->exec_queue_handle, s->lrc_handle);
+
+}
+
 
 static void eu_attention_reset_trigger(struct xe_eudebug_debugger *d,
 				       struct drm_xe_eudebug_event *e)
@@ -800,6 +839,67 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 	free(bitmask);
 }
 
+static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
+				     struct drm_xe_eudebug_event *e)
+{
+	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct online_debug_data *data = d->ptr;
+
+	if (data->last_eu_control_seqno > es->base.seqno)
+		return;
+
+	if (d->flags & TRIGGER_RESUME_DELAYED) {
+		sleep(MAX_PREEMPT_TIMEOUT / 2);
+	} else if (d->flags & TRIGGER_RESUME_SET_BP) {
+		set_breakpoint_once(d, data);
+	}
+
+	/*
+	 * Make sure that all exceptions triggered by the same
+	 * breakpoint has been queued before calling eu control.
+	 */
+	sleep(1);
+
+	/* workload was stopped by interrupt all */
+	if (d->flags & SHADER_LOOP) {
+		int threads = data->thread_count;
+		struct dim_t w_dim = walker_dimensions(threads);
+		uint32_t *target;
+		int tc;
+
+		igt_assert(data->vm_fd != -1);
+		igt_assert(data->target_size != 0);
+		target = calloc(1, data->target_size);
+
+		/* accept some delay */
+		igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
+			fsync(data->vm_fd);
+			vm_read_target(data, target, data->target_size, 0);
+
+			/* that would mean some dispatched threads were not stopped */
+			if (count_canaries_eq(target, w_dim, SHADER_CANARY) == 0)
+				break;
+		}
+
+		tc = count_canaries_neq(target, w_dim, 0);
+		igt_info("%d threads were interrupted.\n", tc);
+
+		igt_assert_f(count_canaries_eq(target, w_dim, SHADER_CANARY) == 0,
+			     "Some threads were not affected by interrupt request!\n");
+		free(target);
+
+		vm_write_target_u32(data, STEERING_END_LOOP, steering_offset(threads));
+		fsync(data->vm_fd);
+
+		eu_ctl_unlock(d->fd, es->client_handle,
+			      es->exec_queue_handle, es->lrc_handle);
+	}
+
+	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, es->client_handle,
+						    es->exec_queue_handle, es->lrc_handle,
+						    NULL, 0);
+}
+
 static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *d,
 						    struct drm_xe_eudebug_event *e)
 {
@@ -1004,7 +1104,7 @@ static void overwrite_immediate_value_in_common_target_write(int vm_fd, uint64_t
 	uint32_t val;
 
 	while (vals_changed < 4) {
-		igt_assert_eq(pread(vm_fd, &val, sizeof(uint32_t), addr), sizeof(uint32_t));
+		vm_read(vm_fd, &val, sizeof(val), addr);
 		if (val == old_val) {
 			igt_debug("val_before_write[%d]: %08x\n", vals_changed, val);
 			vm_write(vm_fd, &new_val, sizeof(new_val), addr);
@@ -1400,8 +1500,20 @@ static void online_session_check(struct xe_eudebug_session *s)
 					  XE_EUDEBUG_FILTER_EVENT_VM_BIND_OP |
 					  XE_EUDEBUG_FILTER_EVENT_VM_BIND_UFENCE);
 
-	bitmask_size = query_attention_bitmask_size(s->debugger->master_fd, data->hwe.gt_id);
+	if (intel_gen_per_context_eudebug(s->debugger->master_fd)) {
+		bool exception_raised = false;
 
+		xe_eudebug_for_each_event(event, s->debugger->log)
+			if (event->type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST) {
+				exception_raised = true;
+				break;
+			}
+
+		igt_assert(expect_exception == exception_raised);
+		return;
+	}
+
+	bitmask_size = query_attention_bitmask_size(s->debugger->master_fd, data->hwe.gt_id);
 	xe_eudebug_for_each_event(event, s->debugger->log) {
 		if (event->type == DRM_XE_EUDEBUG_EVENT_EU_ATTENTION) {
 			ea = (struct drm_xe_eudebug_event_eu_attention *)event;
@@ -1609,6 +1721,12 @@ static void test_basic_online(int fd, struct drm_xe_engine_class_instance *hwe, 
 					eu_attention_resume_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
+
+	/* Per context debug */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_resume_trigger);
 
 	xe_eudebug_session_run(s);
 	online_session_check(s);
@@ -1976,6 +2094,12 @@ static void test_interrupt_all(int fd, struct drm_xe_engine_class_instance *hwe,
 					eu_attention_debug_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
+	/* Per context debug */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_resume_trigger);
+
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
