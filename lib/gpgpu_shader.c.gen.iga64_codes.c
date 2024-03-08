@@ -3,7 +3,7 @@
 
 #include "gpgpu_shader.h"
 
-#define MD5_SUM_IGA64_ASMS 4068ae55c6aa50d845b74f5d61da4630
+#define MD5_SUM_IGA64_ASMS 29fe335b46ba79682d22fee02d0f1022
 
 struct iga64_template const iga64_code_read_a64_d32[] = {
 	{ .gfx_ver = 2000, .size = 40, .code = (const uint32_t []) {
@@ -574,6 +574,19 @@ struct iga64_template const iga64_code_media_block_write_aip[] = {
 		0x80009031, 0x00000000, 0xc0000414, 0x02a00000,
 		0x80000001, 0x00010000, 0x20000000, 0x00000000,
 		0x80000001, 0x00010000, 0x30000000, 0x00000000,
+		0x80000101, 0x00010000, 0x00000000, 0x00000000,
+	}}
+};
+
+struct iga64_template const iga64_code_oob_exception[] = {
+	{ .gfx_ver = 1250, .size = 12, .code = (const uint32_t []) {
+		0x80000061, 0x10014110, 0x00000000, 0xfffefffe,
+		0x80000961, 0x00014118, 0x00000000, 0x00000000,
+		0x80000901, 0x00010000, 0x00000000, 0x00000000,
+	}},
+	{ .gfx_ver = 0, .size = 12, .code = (const uint32_t []) {
+		0x80000061, 0x10014110, 0x00000000, 0xfffefffe,
+		0x80000161, 0x00014118, 0x00000000, 0x00000000,
 		0x80000101, 0x00010000, 0x00000000, 0x00000000,
 	}}
 };
