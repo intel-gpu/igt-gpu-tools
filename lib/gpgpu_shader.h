@@ -101,6 +101,7 @@ void gpgpu_shader__end_system_routine(struct gpgpu_shader *shdr,
 void gpgpu_shader__end_system_routine_step_if_eq(struct gpgpu_shader *shdr,
 						 uint32_t dw_offset,
 						 uint32_t value);
+void gpgpu_shader__trigger_oob_exception(struct gpgpu_shader *shdr);
 void gpgpu_shader__write_aip(struct gpgpu_shader *shdr, uint32_t y_offset);
 void gpgpu_shader__increase_aip(struct gpgpu_shader *shdr, uint32_t value);
 void gpgpu_shader__write_dword(struct gpgpu_shader *shdr, uint32_t value,
