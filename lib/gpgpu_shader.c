@@ -770,6 +770,22 @@ void gpgpu_shader__common_target_write_u32(struct gpgpu_shader *shdr,
 }
 
 /**
+ * gpgpu_shader__trigger_oob_exception:
+ * @shdr: shader to be modified
+ *
+ * Trigger out of bound exception by trying to access unexisting GRF.
+ * This instruction is available only on platforms with IP_VER >= (35,0)
+ */
+void gpgpu_shader__trigger_oob_exception(struct gpgpu_shader *shdr)
+{
+	igt_require(shdr->gfx_ver >= 3500);
+	emit_iga64_code(shdr, oob_exception, R"(
+(W)	mov (1|M0)               a0.0<1>:uw    0xfffe:uw
+(W)	mov (1|M0)               r[a0.0]<1>:uw 0:uw
+	)");
+}
+
+/**
  * gpgpu_shader__write_aip:
  * @shdr: shader to be modified
  * @y_offset: write target offset within the surface in rows
