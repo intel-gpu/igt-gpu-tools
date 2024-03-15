@@ -40,16 +40,24 @@ enum shader_type {
 	SHADER_INV_INSTR_THREAD_ENABLED,
 	SHADER_INV_INSTR_WALKER_ENABLED,
 	SHADER_WRITE,
+	SHADER_OOB_EXCEPTION_DISABLED,
+	SHADER_OOB_EXCEPTION_THREAD_ENABLED,
+	SHADER_OOB_EXCEPTION_MODE_ENABLED,
 };
 
 enum sip_type {
 	SIP_INV_INSTR,
 	SIP_NULL,
+	SIP_OOB,
 };
 
 /* Control Register cr0.1 bits for exception handling */
+#define OOB_ENABLE BIT(11)
 #define ILLEGAL_OPCODE_ENABLE BIT(12)
+#define OOB_STATUS BIT(27)
 #define ILLEGAL_OPCODE_STATUS BIT(28)
+
+#define STATE_COMPUTE_MODE_ENABLE_OOB BIT(7)
 
 static struct intel_buf *
 create_fill_buf(int fd, int width, int height, uint8_t color)
@@ -73,11 +81,13 @@ create_fill_buf(int fd, int width, int height, uint8_t color)
 static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 {
 	static struct gpgpu_shader *shader;
-	uint32_t expected_cr0_bit;
+	uint32_t expected_cr0_bit, bad;
 
 	shader = gpgpu_shader_create(fd);
 	if (shader_type == SHADER_INV_INSTR_WALKER_ENABLED)
 		shader->illegal_opcode_exception_enable = true;
+	else if (shader_type == SHADER_OOB_EXCEPTION_MODE_ENABLED)
+		shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_OOB;
 
 	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 
@@ -105,6 +115,17 @@ static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 		gpgpu_shader__write_on_exception(shader, SHADER_CANARY2, 0, 0,
 						 ILLEGAL_OPCODE_STATUS, ILLEGAL_OPCODE_STATUS);
 		break;
+	case SHADER_OOB_EXCEPTION_THREAD_ENABLED:
+		gpgpu_shader__set_exception(shader, OOB_ENABLE);
+		__attribute__ ((fallthrough));
+	case SHADER_OOB_EXCEPTION_DISABLED:
+	case SHADER_OOB_EXCEPTION_MODE_ENABLED:
+		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
+		bad = (shader_type == SHADER_OOB_EXCEPTION_DISABLED) ? OOB_ENABLE : 0;
+		gpgpu_shader__write_on_exception(shader, 1, 0, 0, OOB_ENABLE, bad);
+		gpgpu_shader__trigger_oob_exception(shader);
+		gpgpu_shader__write_on_exception(shader, 2, 0, 0, OOB_STATUS, OOB_STATUS);
+		break;
 	}
 
 	gpgpu_shader__eot(shader);
@@ -127,6 +148,10 @@ static struct gpgpu_shader *get_sip(int fd, enum sip_type sip_type, unsigned int
 						 ILLEGAL_OPCODE_STATUS, 0);
 		/* skip invalid instruction */
 		gpgpu_shader__increase_aip(sip, 16);
+		break;
+	case SIP_OOB:
+		gpgpu_shader__write_dword(sip, SIP_CANARY, y_offset);
+		gpgpu_shader__write_on_exception(sip, 1, 0, y_offset, OOB_STATUS, 0);
 		break;
 	default:
 		break;
@@ -214,7 +239,8 @@ static void check_buf(int fd, uint32_t handle, int width, int height, int thread
 	else
 		igt_assert_eq(invalidinstr_count, 0);
 
-	if (sip_type == SIP_INV_INSTR && shader_type != SHADER_INV_INSTR_DISABLED)
+	if ((sip_type == SIP_INV_INSTR && shader_type != SHADER_INV_INSTR_DISABLED)||
+	    (sip_type == SIP_OOB && shader_type != SHADER_OOB_EXCEPTION_DISABLED))
 		igt_assert_f(thread_count == sip_count,
 			     "Thread and SIP count mismatch, %d != %d\n",
 			     thread_count, sip_count);
@@ -255,6 +281,21 @@ xe_sysfs_get_job_timeout_ms(int fd, struct drm_xe_engine_class_instance *eci)
  * SUBTEST: invalidinstr-walker-enabled
  * Description: Verify that we enter SIP after running into an invalid instruction
  *              when exception is enabled from COMPUTE_WALKER.
+ *
+ * SUBTEST: oob-exception-disabled-nosip
+ * Description: Check if an out-of-band access switches OOB status bit.
+ *
+ * SUBTEST: oob-exception-disabled-sip
+ * Description: Check if an out-of-band access does not trigger SIP if OOB exception not enabled.
+ *
+ * SUBTEST: oob-exception-thread-enabled-nosip
+ * Description: Check if an out-of-band access does not try to trigger SIP if the SIP is not present but OOB exception is enabled.
+ *
+ * SUBTEST: oob-exception-thread-enabled-sip
+ * Description: Check if an out-of-band access triggers SIP if OOB exception is enabled by EU thread.
+ *
+ * SUBTEST: oob-exception-mode-enabled-sip
+ * Description: Check if an out-of-band access triggers SIP if OOB exception is enabled by STATE_COMPUTE_MODE command.
  */
 static void test_sip(enum shader_type shader_type, enum sip_type sip_type,
 		     struct drm_xe_engine_class_instance *eci, uint32_t flags)
@@ -336,6 +377,24 @@ int igt_main()
 
 	test_render_and_compute("invalidinstr-walker-enabled", fd, eci)
 		test_sip(SHADER_INV_INSTR_WALKER_ENABLED, SIP_INV_INSTR, eci, 0);
+
+	test_render_and_compute("oob-exception-disabled-nosip", fd, eci)
+		test_sip(SHADER_OOB_EXCEPTION_DISABLED, SIP_NULL, eci, 0);
+
+	test_render_and_compute("oob-exception-disabled-sip", fd, eci)
+		test_sip(SHADER_OOB_EXCEPTION_DISABLED, SIP_OOB, eci, 0);
+
+	test_render_and_compute("oob-exception-thread-enabled-nosip", fd, eci) {
+		igt_skip_on_f(igt_run_in_simulation(),
+			      "Simulation does not support EU thread hang\n");
+		test_sip(SHADER_OOB_EXCEPTION_THREAD_ENABLED, SIP_NULL, eci, 0);
+	}
+
+	test_render_and_compute("oob-exception-thread-enabled-sip", fd, eci)
+		test_sip(SHADER_OOB_EXCEPTION_THREAD_ENABLED, SIP_OOB, eci, 0);
+
+	test_render_and_compute("oob-exception-mode-enabled-sip", fd, eci)
+		test_sip(SHADER_OOB_EXCEPTION_MODE_ENABLED, SIP_OOB, eci, 0);
 
 	igt_fixture()
 		drm_close_driver(fd);
