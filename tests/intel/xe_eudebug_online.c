@@ -2055,6 +2055,25 @@ static void test_reset_with_attention_online(int fd, struct drm_xe_engine_class_
 	online_debug_data_destroy(data);
 }
 
+static int wait_for_exception(struct online_debug_data *data, int timeout)
+{
+	int ret = -ETIMEDOUT;
+
+	igt_for_milliseconds(timeout) {
+		pthread_mutex_lock(&data->mutex);
+		if ((data->exception_arrived.tv_sec |
+		     data->exception_arrived.tv_nsec) != 0)
+			ret = 0;
+		pthread_mutex_unlock(&data->mutex);
+
+		if (!ret)
+			break;
+		usleep(1000);
+	}
+
+	return ret;
+}
+
 /**
  * SUBTEST: interrupt-all
  * Functionality: EU control
@@ -2729,9 +2748,7 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 
 			should_break = 0;
 
-			pthread_mutex_lock(&(data[i]->mutex));
-			if ((data[i]->exception_arrived.tv_sec |
-			     data[i]->exception_arrived.tv_nsec) != 0) {
+			if (!wait_for_exception(data[i], 1)) {
 				attempt_mask |= BIT(i);
 				should_break = 1;
 
@@ -2743,7 +2760,6 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 				free(eus);
 
 			}
-			pthread_mutex_unlock(&(data[i]->mutex));
 
 			if (should_break)
 				break;
@@ -2781,6 +2797,167 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 	free(s);
 	free(data);
 	free(hwe);
+}
+
+/**
+ * SUBTEST: breakpoint-many-contexts
+ * Description:
+ *	Schedules EU workload with preinstalled breakpoint on each available engine.
+ *	Checks if every context hit breakpoint exception and resume.
+ */
+static void test_breakpoint_many_contexts(int fd)
+{
+	int n = 0, flags = SHADER_BREAKPOINT | SHADER_MIN_THREADS;
+	struct xe_eudebug_session *s[GEM_MAX_ENGINES] = {};
+	struct online_debug_data *data[GEM_MAX_ENGINES] = {};
+	struct drm_xe_engine_class_instance *hwe[GEM_MAX_ENGINES] = {};
+	struct drm_xe_engine_class_instance *__e;
+	int i;
+
+	xe_for_each_engine(fd, __e)
+		if (__e->engine_class == DRM_XE_ENGINE_CLASS_RENDER || \
+		    __e->engine_class == DRM_XE_ENGINE_CLASS_COMPUTE)
+			hwe[n++] = __e;
+
+	igt_require_f(n > 1, "Test requires at least two parallel compute engines!\n");
+
+	for (i = 0; i < n; i++) {
+		data[i] = online_debug_data_create(fd, hwe[i], flags);
+		s[i] = xe_eudebug_session_create(fd, run_online_client, flags, data[i]);
+
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+						ufence_ack_trigger);
+		/* Per context debug */
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						save_first_exception_trigger);
+
+		igt_assert_eq(xe_eudebug_debugger_attach(s[i]->debugger, s[i]->client), 0);
+
+		xe_eudebug_debugger_start_worker(s[i]->debugger);
+		xe_eudebug_client_start(s[i]->client);
+	}
+
+	for (i = 0; i < n; i++)
+		igt_assert(!wait_for_exception(data[i], STARTUP_TIMEOUT_MS));
+
+	for (i = n - 1; i >= 0; i--) {
+		struct drm_xe_eudebug_event_sync_host *eus =
+		(struct drm_xe_eudebug_event_sync_host *)data[i]->exception_event;
+
+		eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd, eus->client_handle,
+			      eus->exec_queue_handle, eus->lrc_handle, NULL, 0);
+		free(eus);
+
+		xe_eudebug_client_wait_done(s[i]->client);
+		xe_eudebug_debugger_stop_worker(s[i]->debugger);
+
+		xe_eudebug_event_log_print(s[i]->debugger->log, true);
+		online_session_check(s[i]);
+
+		xe_eudebug_session_destroy(s[i]);
+		online_debug_data_destroy(data[i]);
+	}
+}
+
+/**
+ * SUBTEST: interrupt-one-of-many-contexts
+ * Description:
+ *	Schedules EU spinner on each available engine. Then it interrupts one of
+ *	the contexts and checks if the rest of the contexts are not affected.
+ */
+static void test_interrupt_one_of_many_contexts(int fd)
+{
+	int n = 0, flags = SHADER_LOOP | SHADER_MIN_THREADS;
+	struct xe_eudebug_session *s[GEM_MAX_ENGINES] = {};
+	struct online_debug_data *data[GEM_MAX_ENGINES] = {};
+	struct drm_xe_engine_class_instance *hwe[GEM_MAX_ENGINES] = {};
+	struct drm_xe_engine_class_instance *__e;
+	int i, to_interrupt;
+
+	xe_for_each_engine(fd, __e)
+		if (__e->engine_class == DRM_XE_ENGINE_CLASS_RENDER || \
+		    __e->engine_class == DRM_XE_ENGINE_CLASS_COMPUTE)
+			hwe[n++] = __e;
+
+	igt_require_f(n > 1, "Test requires at least two parallel compute engines!\n");
+
+	for (i = 0; i < n; i++) {
+		data[i] = online_debug_data_create(fd, hwe[i], flags);
+		s[i] = xe_eudebug_session_create(fd, run_online_client, flags, data[i]);
+
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+						open_trigger);
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+						exec_queue_trigger);
+
+		/* Per context debug */
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_resume_trigger);
+
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM,
+						vm_open_trigger);
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+						create_metadata_trigger);
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+						ufence_ack_trigger);
+
+		igt_assert_eq(xe_eudebug_debugger_attach(s[i]->debugger, s[i]->client), 0);
+
+		xe_eudebug_debugger_start_worker(s[i]->debugger);
+		xe_eudebug_client_start(s[i]->client);
+	}
+
+	wait_for_workloads_start(data, n);
+
+	to_interrupt = random() % n;
+	pthread_mutex_lock(&data[to_interrupt]->mutex);
+	igt_assert(data[to_interrupt]->exec_queue_handle != -1);
+	eu_ctl_interrupt_all(s[to_interrupt]->debugger->fd, data[to_interrupt]->client_handle,
+				data[to_interrupt]->exec_queue_handle, data[to_interrupt]->lrc_handle);
+	pthread_mutex_unlock(&data[to_interrupt]->mutex);
+
+	for (i = 0; i < n; i++) {
+		struct drm_xe_eudebug_event *event = NULL;
+
+		vm_write_target_u32(data[i], STEERING_END_LOOP, steering_offset(data[i]->thread_count));
+		fsync(data[i]->vm_fd);
+
+		xe_eudebug_client_wait_done(s[i]->client);
+		xe_eudebug_debugger_stop_worker(s[i]->debugger);
+		xe_eudebug_event_log_print(s[i]->debugger->log, true);
+
+		if (i == to_interrupt) {
+			online_session_check(s[i]);
+		} else {
+			xe_eudebug_for_each_event(event, s[i]->debugger->log)
+				if (event->type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST)
+					igt_fail_on_f(true, "Unexpected sync-host event!\n");
+		}
+
+		xe_eudebug_session_destroy(s[i]);
+		online_debug_data_destroy(data[i]);
+	}
+}
+
+static void ccs_mode_all_engines(int num_gt) {
+       int fd, gt, gt_fd, num_slices, ccs_mode;
+
+       for (gt = 0; gt < num_gt; gt++) {
+               fd = drm_open_driver(DRIVER_XE);
+               gt_fd = xe_sysfs_gt_open(fd, gt);
+               close(fd);
+
+               igt_require(igt_sysfs_scanf(gt_fd, "num_cslices", "%u", &num_slices) > 0);
+
+               igt_assert(igt_sysfs_printf(gt_fd, "ccs_mode", "%u", num_slices) > 0);
+               igt_assert(igt_sysfs_scanf(gt_fd, "ccs_mode", "%u", &ccs_mode) > 0);
+               igt_assert(num_slices == ccs_mode);
+               close(gt_fd);
+       }
 }
 
 static struct drm_xe_engine_class_instance *pick_compute(int fd, int gt)
@@ -2827,7 +3004,7 @@ int igt_main()
 {
 	struct drm_xe_engine_class_instance *hwe;
 	bool was_enabled;
-	int fd;
+	int fd, num_gt;
 	uint16_t engine_class = 0xFFFF;
 	uint32_t preempt_timeout = 0xFFFFFFFF;
 
@@ -2945,6 +3122,24 @@ int igt_main()
 
 	igt_subtest("breakpoint-many-sessions-tiles")
 		test_many_sessions_on_tiles(fd, true);
+
+	igt_subtest_group() {
+		igt_fixture() {
+			igt_require(intel_gen_per_context_eudebug(fd));
+			num_gt = xe_number_gt(fd);
+
+			close(fd);
+			ccs_mode_all_engines(num_gt);
+
+			fd = drm_open_driver(DRIVER_XE);
+		}
+
+		igt_subtest("breakpoint-many-contexts")
+			test_breakpoint_many_contexts(fd);
+
+		igt_subtest("interrupt-one-of-many-contexts")
+			test_interrupt_one_of_many_contexts(fd);
+       }
 
 	test_gt_render_or_compute("pagefault-read", fd, hwe)
 		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_READ);
