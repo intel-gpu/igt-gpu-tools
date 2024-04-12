@@ -38,11 +38,10 @@
 #define BB_IN_VRAM			BIT(11)
 #define TARGET_IN_SRAM			BIT(12)
 #define TARGET_IN_VRAM			BIT(13)
-#define SHADER_PAGEFAULT_READ		BIT(14)
-#define SHADER_PAGEFAULT_WRITE		BIT(15)
-#define FAULTABLE_VM			BIT(16)
-#define PAGEFAULT_STRESS_TEST		BIT(17)
-#define SHADER_PAGEFAULT_ONE_OF_MANY	BIT(18)
+#define DISABLE_EXCEPTIONS		BIT(14)
+#define SHADER_PAGEFAULT_READ		BIT(15)
+#define SHADER_PAGEFAULT_WRITE		BIT(16)
+#define FAULTABLE_VM			BIT(17)
 #define TRIGGER_UFENCE_SET_BREAKPOINT	BIT(24)
 #define TRIGGER_RESUME_SINGLE_WALK	BIT(25)
 #define TRIGGER_RESUME_PARALLEL_WALK	BIT(26)
@@ -51,6 +50,8 @@
 #define TRIGGER_RESUME_DELAYED		BIT(29)
 #define TRIGGER_RESUME_DSS		BIT(30)
 #define TRIGGER_RESUME_ONE		BIT(31)
+#define PAGEFAULT_STRESS_TEST		BIT(38)
+#define SHADER_PAGEFAULT_ONE_OF_MANY	BIT(39)
 
 #define SHADER_PAGEFAULT	(SHADER_PAGEFAULT_READ | SHADER_PAGEFAULT_WRITE | \
 				 SHADER_PAGEFAULT_ONE_OF_MANY)
@@ -277,6 +278,9 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
 		if (data->flags & SHADER_LOOP)
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
+
+		if (data->flags & DISABLE_EXCEPTIONS)
+			shader->exceptions &= ~0xffff;
 	}
 
 	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
@@ -848,6 +852,10 @@ static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
 	if (data->last_eu_control_seqno > es->base.seqno)
 		return;
 
+	pthread_mutex_lock(&data->mutex);
+	igt_gettime(&data->exception_arrived);
+	pthread_mutex_unlock(&data->mutex);
+
 	if (d->flags & TRIGGER_RESUME_DELAYED) {
 		sleep(MAX_PREEMPT_TIMEOUT / 2);
 	} else if (d->flags & TRIGGER_RESUME_SET_BP) {
@@ -1340,7 +1348,8 @@ static void run_online_client(struct xe_eudebug_client *c)
 		igt_assert_f(data->thread_hit_count, "No canaries found, nothing executed?\n");
 
 		if ((data->flags & SHADER_BREAKPOINT || data->flags & TRIGGER_RESUME_SET_BP ||
-		     data->flags & SHADER_N_NOOP_BREAKPOINT) && !(data->flags & DISABLE_DEBUG_MODE)) {
+		     data->flags & SHADER_N_NOOP_BREAKPOINT) &&
+		    !(data->flags & (DISABLE_DEBUG_MODE | DISABLE_EXCEPTIONS))) {
 			uint32_t aip = ptr[0];
 
 			igt_assert_f(aip != SHADER_CANARY,
@@ -1491,7 +1500,7 @@ static void online_session_check(struct xe_eudebug_session *s)
 	struct drm_xe_eudebug_event *event = NULL;
 	struct online_debug_data *data = s->client->ptr;
 	uint64_t flags = data->flags;
-	bool expect_exception = flags & DISABLE_DEBUG_MODE ? false : true;
+	bool expect_exception = flags & (DISABLE_EXCEPTIONS | DISABLE_DEBUG_MODE) ? false : true;
 	int sum = 0;
 	int bitmask_size;
 	int pagefault_threads = 0;
@@ -1682,6 +1691,11 @@ static void pagefault_trigger(struct xe_eudebug_debugger *d,
  * Description:
  *	Check whether KMD sends attention events
  *	for workload in debug mode stopped on breakpoint.
+ *
+ * SUBTEST: basic-breakpoint-exception-disabled
+ * Description:
+ *	Confirm breakpoint exception is not sent when it is disabled.
+ *	Applies only to platforms which can enable exceptions per context.
  *
  * SUBTEST: breakpoint-not-in-debug-mode
  * Functionality: EU attention event
@@ -2082,6 +2096,12 @@ static int wait_for_exception(struct online_debug_data *data, int timeout)
  *	interrupts all threads, checks whether attention event came, and
  *	resumes stopped threads back.
  *
+ * SUBTEST: interrupt-all-exception-disabled
+ * Description:
+ *	Confirm an exception is not sent on interrupt-all
+ *	when forcing exception is disabled. Applies only to platforms
+ *      which can enable exceptions per context.
+ *
  * SUBTEST: interrupt-all-set-breakpoint
  * Functionality: dynamic breakpoint
  * Description:
@@ -2137,6 +2157,12 @@ static void test_interrupt_all(int fd, struct drm_xe_engine_class_instance *hwe,
 	eu_ctl_interrupt_all(s->debugger->fd, data->client_handle,
 			     data->exec_queue_handle, data->lrc_handle);
 	pthread_mutex_unlock(&data->mutex);
+
+	/* Mainly for negative testcase, try to terminate cleanly when exception did not arrive. */
+	if (wait_for_exception(data, STARTUP_TIMEOUT_MS)) {
+		vm_write_target_u32(data, STEERING_END_LOOP, steering_offset(data->thread_count));
+		fsync(data->vm_fd);
+	}
 
 	xe_eudebug_client_wait_done(s->client);
 
@@ -3126,6 +3152,15 @@ int igt_main()
 	igt_subtest_group() {
 		igt_fixture() {
 			igt_require(intel_gen_per_context_eudebug(fd));
+		}
+
+		test_gt_render_or_compute("basic-breakpoint-exception-disabled", fd, hwe)
+			test_basic_online(fd, hwe, SHADER_BREAKPOINT | DISABLE_EXCEPTIONS);
+
+		test_gt_render_or_compute("interrupt-all-exception-disabled", fd, hwe)
+			test_interrupt_all(fd, hwe, SHADER_LOOP | DISABLE_EXCEPTIONS);
+
+		igt_fixture() {
 			num_gt = xe_number_gt(fd);
 
 			close(fd);
