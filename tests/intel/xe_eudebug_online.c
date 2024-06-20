@@ -16,6 +16,7 @@
 #include "xe/xe_gt.h"
 #include "xe/xe_ioctl.h"
 #include "xe/xe_query.h"
+#include "xe/xe_util.h"
 #include "igt.h"
 #include "igt_sysfs.h"
 #include "intel_pat.h"
@@ -41,7 +42,9 @@
 #define DISABLE_EXCEPTIONS		BIT(14)
 #define SHADER_PAGEFAULT_READ		BIT(15)
 #define SHADER_PAGEFAULT_WRITE		BIT(16)
-#define FAULTABLE_VM			BIT(17)
+#define SHADER_PAGEFAULT_ATOMIC_READ	BIT(17)
+#define SHADER_PAGEFAULT_ATOMIC_WRITE	BIT(18)
+#define FAULTABLE_VM			BIT(19)
 #define TRIGGER_UFENCE_SET_BREAKPOINT	BIT(24)
 #define TRIGGER_RESUME_SINGLE_WALK	BIT(25)
 #define TRIGGER_RESUME_PARALLEL_WALK	BIT(26)
@@ -53,7 +56,8 @@
 #define PAGEFAULT_STRESS_TEST		BIT(38)
 #define SHADER_PAGEFAULT_ONE_OF_MANY	BIT(39)
 
-#define SHADER_PAGEFAULT	(SHADER_PAGEFAULT_READ | SHADER_PAGEFAULT_WRITE | \
+#define SHADER_PAGEFAULT	(SHADER_PAGEFAULT_READ | SHADER_PAGEFAULT_WRITE |\
+				 SHADER_PAGEFAULT_ATOMIC_READ | SHADER_PAGEFAULT_ATOMIC_WRITE |\
 				 SHADER_PAGEFAULT_ONE_OF_MANY)
 #define BB_REGION_BITMASK	(BB_IN_SRAM | BB_IN_VRAM)
 #define TARGET_REGION_BITMASK	(TARGET_IN_SRAM | TARGET_IN_VRAM)
@@ -90,6 +94,195 @@ struct dim_t {
 	uint32_t y;
 	uint32_t alignment;
 };
+
+struct sip_arf_dump {
+	/*
+	 * EU Thread's load/store has limitation on vector size variation.
+	 * (D32 / v8) bspec: 72013
+	 * dw0 - dw7
+	 */
+#ifndef BITRANGE
+#define BITRANGE(start, end) (end - start + 1)
+#endif
+	/* bspec: 56624 */
+	union {
+		struct {
+			uint32_t rsvd1:					BITRANGE(0, 9);
+			uint32_t memory_exception_enable:		BITRANGE(10, 10);
+			uint32_t oob_grf_translation_exception_enable:	BITRANGE(11, 11);
+			uint32_t illegal_opcode_exception_enable:	BITRANGE(12, 12);
+			uint32_t software_exception_enable:		BITRANGE(13, 13);
+			uint32_t external_halt_exception_enable:	BITRANGE(14, 14);
+			uint32_t breakpoint_enable:			BITRANGE(15, 15);
+			uint32_t rsvd0:					BITRANGE(16, 22);
+			uint32_t memory_exception_status:		BITRANGE(23, 23);
+			uint32_t restore_exception_status:		BITRANGE(24, 24);
+			uint32_t preemption_exception_status:		BITRANGE(25, 25);
+			uint32_t force_exception_status:		BITRANGE(26, 26);
+			uint32_t oob_grf_translation_exception_status:	BITRANGE(27, 27);
+			uint32_t illegal_opcode_exception_status:	BITRANGE(28, 28);
+			uint32_t software_exception_control:		BITRANGE(29, 29);
+			uint32_t external_halt_exception_status:	BITRANGE(30, 30);
+			uint32_t breakpoint_status:			BITRANGE(31, 31);
+		} cr0_1; // dw0
+
+		struct {
+			uint32_t raw;
+		} dw00;
+	};
+
+	union {
+		struct {
+			uint32_t rsvd0:					BITRANGE(0, 2);
+			uint32_t aip_low:				BITRANGE(3, 31);
+		} cr0_2; // dw1
+
+		struct {
+			uint32_t raw;
+		} dw01;
+	};
+
+	union {
+		struct {
+			uint32_t aip_high:				BITRANGE(0, 31);
+		} cr0_3;  // dw2
+
+		struct {
+			uint32_t raw;
+		} dw02;
+	};
+
+	/* bspec: 56622 */
+	union {
+		struct {
+			uint32_t slm_size:				BITRANGE(0, 3);
+			uint32_t slm_offset:				BITRANGE(4, 12);
+			uint32_t rsvd1:					BITRANGE(13, 16);
+			uint32_t pagefault_exception_enable:		BITRANGE(17, 17);
+			uint32_t rsvd0:					BITRANGE(18, 19);
+			uint32_t number_of_barriers:			BITRANGE(20, 23);
+			uint32_t barrier_id:				BITRANGE(24, 31);
+		} msg0_1;  //dw3
+
+		struct {
+			uint32_t raw;
+		} dw03;
+	};
+
+	/* bspec: 56630 */
+	union {
+		struct {
+			uint32_t memory_exception_type:			BITRANGE(0, 2);
+			uint32_t rsvd1:					BITRANGE(3, 3);
+			uint32_t pagefault_status_subtype:		BITRANGE(4, 7);
+			uint32_t rsvd0:					BITRANGE(8, 26);
+			uint32_t sbid:					BITRANGE(27, 31);
+		} dbg0_4; // dw4
+
+		struct {
+			uint32_t raw;
+		} dw04;
+	};
+
+	union {
+		struct {
+			uint32_t thread_halted;
+		} rsvd0; // dw5
+
+		struct {
+			uint32_t raw;
+		} dw05;
+	};
+
+	union {
+		struct {
+			uint32_t thread_resume;
+		} rsvd1; // dw6
+
+		struct {
+			uint32_t raw;
+		} dw06;
+	};
+
+	/* bspec: 56623 */
+	union {
+		struct {
+			uint32_t tid:					BITRANGE(0, 3);
+			uint32_t euid:					BITRANGE(4, 6);
+			uint32_t rsvd3:					BITRANGE(7, 7);
+			uint32_t sub_slice_id:				BITRANGE(8, 11);
+			uint32_t rsvd2:					BITRANGE(12, 13);
+			uint32_t slice_id:				BITRANGE(14, 17);
+			uint32_t rsvd1:					BITRANGE(18, 18);
+			uint32_t priority:				BITRANGE(19, 22);
+			uint32_t priority_class:			BITRANGE(23, 23);
+			uint32_t ffid:					BITRANGE(24, 27);
+			uint32_t rsvd0:					BITRANGE(28, 31);
+		} sr0_0; // dw7
+
+		struct {
+			uint32_t raw;
+		} dw07;
+	};
+
+};
+
+static void print_sip_arf_dump(struct sip_arf_dump *arf_dump, int x, int y)
+{
+	igt_debug("=========================================================\n");
+	igt_debug("\tarf_dump[%d][%d].cr0_1\n", y, x);
+	igt_debug("\t\tmemory_exception_enable: %d\n", arf_dump->cr0_1.memory_exception_enable);
+	igt_debug("\t\toob_grf_translation_exception_enable: %d\n", arf_dump->cr0_1.oob_grf_translation_exception_enable);
+	igt_debug("\t\tillegal_opcode_exception_enable: %d\n", arf_dump->cr0_1.illegal_opcode_exception_enable);
+	igt_debug("\t\tsoftware_exception_enable: %d\n", arf_dump->cr0_1.software_exception_enable);
+	igt_debug("\t\texternal_halt_exception_enable: %d\n", arf_dump->cr0_1.external_halt_exception_enable);
+	igt_debug("\t\tbreakpoint_enable: %d\n", arf_dump->cr0_1.breakpoint_enable);
+	igt_debug("\t\trestore_exception_status: %d\n", arf_dump->cr0_1.restore_exception_status);
+	igt_debug("\t\tpreemption_exception_status: %d\n", arf_dump->cr0_1.preemption_exception_status);
+	igt_debug("\t\tforce_exception_status: %d\n", arf_dump->cr0_1.force_exception_status);
+	igt_debug("\t\toob_grf_translation_exception_status: %d\n", arf_dump->cr0_1.oob_grf_translation_exception_status);
+	igt_debug("\t\tillegal_opcode_exception_status: %d\n", arf_dump->cr0_1.illegal_opcode_exception_status);
+	igt_debug("\t\tsoftware_exception_control: %d\n", arf_dump->cr0_1.software_exception_control);
+	igt_debug("\t\texternal_halt_exception_status: %d\n", arf_dump->cr0_1.external_halt_exception_status);
+	igt_debug("\t\tbreakpoint_status: %d\n", arf_dump->cr0_1.breakpoint_status);
+	igt_debug("\t-------------------------------------------------\n");
+	igt_debug("\tarf_dump[%d][%d].cr0_2, cr0_3\n", y, x);
+	igt_debug("\t\tAIP: 0x%lx\n", (((uint64_t)arf_dump->cr0_3.aip_high) << 32) + (((uint64_t)arf_dump->cr0_2.aip_low) << 3));
+	igt_debug("\t-------------------------------------------------\n");
+	igt_debug("\tarf_dump[%d][%d].msg0_1\n", y, x);
+	igt_debug("\t\tslm_size: %d\n", arf_dump->msg0_1.slm_size);
+	igt_debug("\t\tslm_offset: %d\n", arf_dump->msg0_1.slm_offset);
+	igt_debug("\t\tpagefault_exception_enable: %d\n", arf_dump->msg0_1.pagefault_exception_enable);
+	igt_debug("\t\tnumber_of_barriers: %d\n", arf_dump->msg0_1.number_of_barriers);
+	igt_debug("\t\tbarrier_id: %d\n", arf_dump->msg0_1.barrier_id);
+	igt_debug("\t-------------------------------------------------\n");
+	igt_debug("\tarf_dump[%d][%d].dbg0_4\n", y, x);
+	igt_debug("\t\tmemory_exception_type: %d\n", arf_dump->dbg0_4.memory_exception_type);
+	igt_debug("\t\tpagefault_status_subtype: %d\n", arf_dump->dbg0_4.pagefault_status_subtype);
+	igt_debug("\t\tsbid: %d\n", arf_dump->dbg0_4.sbid);
+	igt_debug("\t-------------------------------------------------\n");
+	igt_debug("\t\tthread_halted: %d, thread_resume: %d\n", arf_dump->rsvd0.thread_halted, arf_dump->rsvd1.thread_resume);
+	igt_debug("\t-------------------------------------------------\n");
+	igt_debug("\tarf_dump[%d][%d].sr0_0\n", y, x);
+	igt_debug("\t\ttid: %d\n", arf_dump->sr0_0.tid);
+	igt_debug("\t\teuid: %d\n", arf_dump->sr0_0.euid);
+	igt_debug("\t\tsub_slice_id: %d\n", arf_dump->sr0_0.sub_slice_id);
+	igt_debug("\t\tslice_id: %d\n", arf_dump->sr0_0.slice_id);
+	igt_debug("\t\tpriority: %d\n", arf_dump->sr0_0.priority);
+	igt_debug("\t\tpriority_class: %d\n", arf_dump->sr0_0.priority_class);
+	igt_debug("\t\tffid: %d\n", arf_dump->sr0_0.ffid);
+}
+
+static void print_debug_surface(uint32_t *ptr, struct dim_t w_dim)
+{
+	for (int y = 0; y < w_dim.y ; y++) {
+		for (int x = 0; x < w_dim.x ; x++) {
+			print_sip_arf_dump((void *)ptr, x, y);
+			ptr += sizeof(struct sip_arf_dump) / sizeof(*ptr);
+		}
+	}
+	igt_debug("=========================================================\n");
+}
 
 static struct dim_t walker_dimensions(int threads)
 {
@@ -132,6 +325,17 @@ static struct intel_buf *create_uc_buf(int fd, int width, int height, uint64_t r
 	return buf;
 }
 
+static struct intel_buf *create_uc_buf_for_e64(int fd, int width, int height, int element_size)
+{
+	struct intel_buf *buf;
+	buf = intel_buf_create_full(buf_ops_create(fd), 0, width * element_size,
+				    height, 8, 0, I915_TILING_NONE, 0, 0, 0,
+				    vram_if_possible(fd, 0), DEFAULT_PAT_INDEX,
+				    DEFAULT_MOCS_INDEX);
+
+	return buf;
+}
+
 struct online_debug_data {
 	pthread_mutex_t mutex;
 	/* client in */
@@ -165,6 +369,7 @@ struct online_debug_data {
 	int num_threads_per_eu;
 	int max_subslices_per_slice;
 	struct dim_t w_dim;
+	int thread_resumed;
 	bool acked;
 };
 
@@ -240,14 +445,164 @@ static bool intel_gen_per_context_eudebug(int fd)
 	return intel_gen(id) >= 35;
 }
 
-#define STATE_COMPUTE_MODE_ENABLE_FE_FEH	BIT(15)
-#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS	BIT(14)
+static void emit_e64b_read_page_fault(struct gpgpu_shader *shdr, uint64_t addr)
+{
+	igt_assert(shdr->gfx_ver >= 3500);
+	igt_assert_f((addr & 0x3) == 0, "address must be aligned to DWord!\n");
+
+	emit_iga64_code(shdr, e64b_read_page_fault, R"(
+#if GFX_VER >= 3500
+// Set base address with scalar register
+(W)	mov (1)		s0.0<1>:ud ARG(0):ud
+(W)	mov (1)		s0.1<1>:ud ARG(1):ud
+// A64 offset
+(W)	mov (8)		r30.0<1>:uq 0x0:uq
+// load.ugm.d64t.a64.uc.uc.uc [src0]
+(W)	sendg.ugm (1)	r31 r30:1 null:0 s0.0 0x29c00
+#endif
+	)", lower_32_bits(addr), upper_32_bits(addr));
+}
+
+static void emit_e64b_write_page_fault(struct gpgpu_shader *shdr, uint64_t addr)
+{
+	igt_assert(shdr->gfx_ver >= 3500);
+	igt_assert_f((addr & 0x3) == 0, "address must be aligned to DWord!\n");
+
+	emit_iga64_code(shdr, e64b_write_page_fault, R"(
+#if GFX_VER >= 3500
+// Set base address with scalar register
+(W)	mov (1)		s0.0<1>:ud ARG(0):ud
+(W)	mov (1)		s0.1<1>:ud ARG(1):ud
+// initialize register
+(W)	mov (8)		r20.0<1>:uq 0x0:uq
+(W)	mov (1)		r20.0<1>:ud 0xdeadbeaf:ud
+// A64 offset
+(W)	mov (8)		r30.0<1>:uq 0x0:uq
+// store.ugm.d32t.a64.uc.uc.uc [src0]
+(W)	sendg.ugm (1)	null r30:1 r20:1 s0.0 0x29404
+#endif
+	)", lower_32_bits(addr), upper_32_bits(addr));
+}
+
+static void emit_e64b_atomic_read_page_fault(struct gpgpu_shader *shdr, uint64_t addr)
+{
+	igt_assert(shdr->gfx_ver >= 3500);
+	igt_assert_f((addr & 0x3) == 0, "address must be aligned to DWord!\n");
+
+	emit_iga64_code(shdr, e64b_atomic_read_page_fault, R"(
+#if GFX_VER >= 3500
+// Set base address with scalar register
+(W)	mov (1)		s0.0<1>:ud ARG(0):ud
+(W)	mov (1)		s0.1<1>:ud ARG(1):ud
+// initialize register
+(W)	mov (8)		r30.0<1>:uq 0x0:uq
+(W)	mov (8)		r31.0<1>:uq 0x0:uq
+// atomic_load.ugm.d32.a64.uc.uc.uc [src0]
+(W)	sendg.ugm (1)	r32 r30:2 null:0 s0.0 0x2900A
+#endif
+	)", lower_32_bits(addr), upper_32_bits(addr));
+}
+
+static void emit_e64b_atomic_write_page_fault(struct gpgpu_shader *shdr, uint64_t addr)
+{
+	igt_assert(shdr->gfx_ver >= 3500);
+	igt_assert_f((addr & 0x3) == 0, "address must be aligned to DWord!\n");
+
+	emit_iga64_code(shdr, e64b_atomic_write_page_fault, R"(
+#if GFX_VER >= 3500
+// Set base address with scalar register
+(W)	mov (1)		s0.0<1>:ud ARG(0):ud
+(W)	mov (1)		s0.1<1>:ud ARG(1):ud
+// initialize register
+(W)	mov (8)		r20.0<1>:uq 0x0:uq
+(W)	mov (1)		r20.0<1>:ud 0xdeadbeaf:ud
+// Prepare atomic_store A64 address payload for SIMT16
+(W)	mov (8)		r30.0<1>:uq 0x0:uq
+(W)	mov (8)		r31.0<1>:uq 0x0:uq
+// Prepare atomic_store D32 dest data payload for SIMT16
+(W)	mov (8)		r32.0<1>:ud r20.0<0;1,0>:ud
+// atomic_store.ugm.d32.a64.uc.uc.uc [src0]
+(W)	sendg.ugm (1)	null r30:2 r32:1 s0.0 0x2900b
+#endif
+	)", lower_32_bits(addr), upper_32_bits(addr));
+}
+
+/**
+ * emit_e64b_store_arf:
+ * @shdr: shader to be modified
+ *
+ * Stores the ARF registers of the currently running eu thread in dedicated
+ * thread space. The ARF registers to be saved are programmed with the eu thread
+ * instruction. When changing the shader, struct *_sip_arf_dump must also be
+ * changed. Struct *_sip_arf_dump is used to print out the ARF information stored
+ * in memory.
+ *
+ * Please note that @gpgpu_shader__end_system_routine_step_arf() shader
+ * for single-stepping test depends on this shader.
+ */
+static void emit_e64b_store_arf(struct gpgpu_shader *shdr)
+{
+	igt_assert(shdr->gfx_ver >= 3500);
+
+	emit_iga64_code(shdr, e64b_store_arf, R"(
+#if GFX_VER >= 3500
+// Set base address with scalar register
+(W)	mov (1)		s0.0<1>:uq R1_TGT_ADDRESS
+// initialize register for store
+(W)	mov (8)		r10.0<1>:uq 0x0:uq
+// initialize register for load
+(W)	mov (8)		r11.0<1>:uq 0x0:uq
+// Prepare Data store
+(W)	mov (1)		r10.0<1>:ud cr0.1<0;1,0>:ud
+(W)	mov (1)		r10.1<1>:ud cr0.2<0;1,0>:ud
+(W)	mov (1)		r10.2<1>:ud cr0.3<0;1,0>:ud
+(W)	mov (1)		r10.3<1>:ud msg0.1<0;1,0>:ud
+(W)	mov (1)		r10.4<1>:ud dbg0.4<0;1,0>:ud
+(W)	mov (1)		r10.5<1>:ud 0x1:ud // set halted flag
+(W)	mov (1)		r10.6<1>:ud 0x0:ud // unset resume flag
+(W)	mov (1)		r10.7<1>:ud sr0.0<0;1,0>:ud
+// A64 offset initialize
+(W)	mov (8)		r20.0<1>:uq 0x0:uq
+// Calculate the address using Thread Group ID X, Thread Group ID Y,
+// and the size of the data block is 0x20
+// Configure Structure_INTERFACE_DESCRIPTOR_DATA_2 to have only 1 thread per thread group
+// Calculate Address offset
+// ((tgid y * x_dim ) + tgid x ) * data_size_to_save (0x20)
+// Structure_GPGPU_R0Payload (bspec: 56587) holds Thread Group ID X and Thread Group ID Y
+// Thread Group ID Y =>  r0.6<0;1,0>:ud
+// Thread Group DIM_X => DIM_X from inline data
+(W)	mul (1)		r20.0<1>:ud r0.6<0;1,0>:ud R1_DIM_X
+// Thread Group ID X =>  r0.1<0;1,0>:ud
+(W)	add (1)		r20.0<1>:ud r20.0<0;1,0>:ud r0.1<0;1,0>:ud
+// Data block size: 8 x D32 => 32 bytes => 0x20
+(W)	mul (1)		r20.0<1>:ud r20.0<0;1,0>:ud 0x20:ud
+// store.ugm.d32x8t.a64.uc.uc.uc [src0]
+(W)	sendg.ugm (1)	null r20:1 r10:1 s0.0 0x29604
+
+WAIT_HOST:
+(W)	sync.host	null
+// Load memory and if resume is not 1, jump to sync.host line with jmpi to execute again
+// load.ugm.d32x8t.a64.uc.uc.uc [src0]
+(W)	sendg.ugm (1)	r11 r20:1 null:0 s0.0 0x29600
+// If the r11.6<1>:ud does have value 0, then the sip should wait again with sync.host
+(W)	mov (1)		f0.0<1>:ud 0x0:ud
+(W)	cmp (1) (eq)f0.0 null<1>:ud r11.6<0;1,0>:ud 0x0:ud
+(W&f0.0) jmpi		WAIT_HOST
+#endif
+	)");
+}
+
+#define STATE_COMPUTE_MODE_ENABLE_FE_FEH		BIT(15)
+#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS		BIT(14)
+#define STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION	BIT(13)
+#define STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION	BIT(9)
 
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
 	struct dim_t w_dim = walker_dimensions(data->thread_count);
 	struct dim_t s_dim = surface_dimensions(data->thread_count);
 	static struct gpgpu_shader *shader;
+	uint64_t pf_addr = xe_canonical_va(data->drm_fd, 0x1f000000);
 
 	shader = gpgpu_shader_create(data->drm_fd);
 
@@ -265,12 +620,29 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
 		if (data->flags & SHADER_LOOP)
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
+		if (data->flags & SHADER_PAGEFAULT)
+			shader->exceptions |= (STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION |
+					       STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION);
 
 		if (data->flags & DISABLE_EXCEPTIONS)
 			shader->exceptions &= ~0xffff;
 	}
 
-	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
+	if ((data->flags & SHADER_PAGEFAULT) &&
+	    (shader->exceptions & STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION)) {
+		if (data->flags & SHADER_PAGEFAULT_READ)
+			emit_e64b_read_page_fault(shader, pf_addr);
+		else if (data->flags & SHADER_PAGEFAULT_WRITE)
+			emit_e64b_write_page_fault(shader, pf_addr);
+		else if (data->flags & SHADER_PAGEFAULT_ATOMIC_READ)
+			emit_e64b_atomic_read_page_fault(shader, pf_addr);
+		else if (data->flags & SHADER_PAGEFAULT_ATOMIC_WRITE)
+			emit_e64b_atomic_write_page_fault(shader, pf_addr);
+	}
+	else {
+		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
+	}
+
 	if (data->flags & SHADER_BREAKPOINT) {
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__breakpoint(shader);
@@ -298,7 +670,8 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 			gpgpu_shader__common_target_write_u32(shader, s_dim.y + i, CACHING_VALUE(i));
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__breakpoint(shader);
-	} else if (data->flags & SHADER_PAGEFAULT) {
+	} else if ((data->flags & SHADER_PAGEFAULT) &&
+		   !(shader->exceptions & STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION)) {
 		if (data->flags & SHADER_PAGEFAULT_READ)
 			gpgpu_shader__read_a64_d32(shader, BAD_OFFSET);
 		else if (data->flags & SHADER_PAGEFAULT_WRITE)
@@ -337,10 +710,14 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 	static struct gpgpu_shader *sip;
 
 	sip = gpgpu_shader_create(data->drm_fd);
-	if (!(data->flags & SHADER_PAGEFAULT_ONE_OF_MANY))
-		gpgpu_shader__write_aip(sip, 0);
-	else
-		emit_iga64_code(sip, store_sr0_0, R"(
+
+	if ((sip->gfx_ver >= 3500) && (data->flags & SHADER_PAGEFAULT)) {
+		emit_e64b_store_arf(sip);
+	} else {
+		if (!(data->flags & SHADER_PAGEFAULT_ONE_OF_MANY))
+			gpgpu_shader__write_aip(sip, 0);
+		else
+			emit_iga64_code(sip, store_sr0_0, R"(
 #if GFX_VER >= 2000
 	mov (1) r5.0<1>:ud sr0.0:ud
 	SET_THREAD_SPACE_ADDR(r4, 0, 0:ud, 4)
@@ -348,7 +725,14 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 #endif
 			)");
 
-	gpgpu_shader__wait(sip);
+		/*
+		* As gpgpu_shader__store_arf() shader implements its own
+		* sync.host call routine, therefore XE3p's SHADER_PAGEFAULT case
+		* should not call gpgpu_shader__wait() shader function.
+		*/
+		gpgpu_shader__wait(sip);
+	}
+
 	if (data->flags & SIP_SINGLE_STEP)
 		gpgpu_shader__end_system_routine_step_if_eq(sip, w_dim.y, 0);
 	else
@@ -383,6 +767,25 @@ static int count_canaries_eq(uint32_t *ptr, struct dim_t w_dim, uint32_t value)
 static int count_canaries_neq(uint32_t *ptr, struct dim_t w_dim, uint32_t value)
 {
 	return w_dim.x * w_dim.y - count_canaries_eq(ptr, w_dim, value);
+}
+
+static int count_canaries_eq_for_e64(uint32_t *ptr, struct dim_t w_dim, uint32_t elm_count,
+			      uint32_t offset, uint32_t value)
+{
+	int count = 0;
+	int i;
+
+	for (i = 0; i < w_dim.x * w_dim.y; i++)
+		if (READ_ONCE(ptr[i * elm_count + offset]) == value)
+			count++;
+
+	return count;
+}
+
+static int count_canaries_neq_for_e64(uint32_t *ptr, struct dim_t w_dim, uint32_t elm_count,
+			       uint32_t offset, uint32_t value)
+{
+	return w_dim.x * w_dim.y - count_canaries_eq_for_e64(ptr, w_dim, elm_count, offset, value);
 }
 
 static const char *td_ctl_cmd_to_str(uint32_t cmd)
@@ -991,6 +1394,66 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 			data->single_step_bitmask[i] &= ~att->bitmask[i];
 }
 
+static bool set_resume_on_halted_thread(struct online_debug_data *data)
+{
+	uint32_t thread_resume_pos = offsetof(struct sip_arf_dump, rsvd1.thread_resume);
+	__off64_t offset = 0;
+	int x, y;
+
+	fsync(data->vm_fd);
+	for (y = 0; y < data->w_dim.y ; y++) {
+		for (x = 0; x < data->w_dim.x ; x++) {
+			struct sip_arf_dump arf_dump;
+
+			vm_read_target(data, &arf_dump, sizeof(arf_dump), offset);
+
+			if (arf_dump.rsvd0.thread_halted == 1 &&
+			    arf_dump.rsvd1.thread_resume != 1) {
+
+				print_sip_arf_dump(&arf_dump, x, y);
+
+				vm_write_target_u32(data, 1, offset + thread_resume_pos);
+
+				fsync(data->vm_fd);
+
+				arf_dump.rsvd1.thread_resume = vm_read_target_u32(data, offset + thread_resume_pos);
+
+				igt_debug("\t-------------------------------------------------\n");
+				igt_debug("\t\tarf_dump[%d][%d] Ater resume set => thread_halted: %d, thread_resume: %d\n",
+					  y, x, arf_dump.rsvd0.thread_halted, arf_dump.rsvd1.thread_resume);
+				igt_debug("\t-------------------------------------------------\n");
+				return true;
+			}
+			offset += sizeof(arf_dump);
+		}
+	}
+	igt_debug("=========================================================\n");
+
+	return false;
+}
+
+static void sync_host_e64_resume_trigger(struct xe_eudebug_debugger *d,
+					 struct drm_xe_eudebug_event *e)
+{
+	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct online_debug_data *data = d->ptr;
+	static int count = 1;
+
+	if (!(data->thread_resumed < data->w_dim.x * data->w_dim.y))
+		return;
+
+	igt_debug("sync_host_e64_resume_trigger count = %d\n", count);
+
+	if (set_resume_on_halted_thread(data))
+		data->thread_resumed++;
+
+	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, es->client_handle,
+				      es->exec_queue_handle, es->lrc_handle,
+				      NULL, 0);
+
+	count++;
+}
+
 static void open_trigger(struct xe_eudebug_debugger *d,
 			 struct drm_xe_eudebug_event *e)
 {
@@ -1366,6 +1829,120 @@ static void run_online_client(struct xe_eudebug_client *c)
 
 	intel_buf_destroy(buf);
 
+	xe_eudebug_client_close_driver(c, fd);
+}
+
+static void run_online_client_for_e64(struct xe_eudebug_client *c)
+{
+	uint32_t elm_count = sizeof(struct sip_arf_dump) / sizeof(uint32_t);
+	struct online_debug_data *data = c->ptr;
+	int threads = data->thread_count;
+	const uint64_t target_offset = 0x1a000000;
+	const uint64_t bb_offset = 0x1b000000;
+	const size_t bb_size = 4096;
+	struct drm_xe_engine_class_instance hwe = data->hwe;
+	struct drm_xe_ext_set_property ext = {
+		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
+		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
+		.value = DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE |
+			 DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_PAGEFAULT_ENABLE,
+	};
+	struct drm_xe_exec_queue_create create = {
+		.instances = to_user_pointer(&hwe),
+		.width = 1,
+		.num_placements = 1,
+		.extensions = to_user_pointer(&ext)
+	};
+	struct dim_t w_dim = walker_dimensions(threads);
+	struct timespec ts = { };
+	struct gpgpu_shader *sip, *shader;
+	uint32_t metadata_id[2];
+	uint64_t *metadata[2];
+	struct intel_bb *ibb;
+	struct intel_buf *buf;
+	uint32_t vm_flags = 0;
+	uint32_t *ptr;
+	uint32_t aip;
+	int fd;
+
+	metadata[0] = calloc(2, sizeof(*metadata));
+	metadata[1] = calloc(2, sizeof(*metadata));
+	igt_assert(metadata[0]);
+	igt_assert(metadata[1]);
+
+	fd = xe_eudebug_client_open_driver(c);
+	xe_device_get(fd);
+
+	igt_debug("struct sip_arf_dump size: %ld bytes\n", sizeof(struct sip_arf_dump));
+	buf = create_uc_buf_for_e64(fd, w_dim.x , w_dim.y, sizeof(struct sip_arf_dump));
+
+	/* SIP's debug surface ppgtt address for VM_BIND */
+	buf->addr.offset = target_offset;
+
+	metadata[0][0] = bb_offset;
+	metadata[0][1] = bb_size;
+	metadata[1][0] = target_offset;
+	metadata[1][1] = buf->size;
+	metadata_id[0] = xe_eudebug_client_metadata_create(c, fd, DRM_XE_DEBUG_METADATA_ELF_BINARY,
+							   2 * sizeof(*metadata), metadata[0]);
+	metadata_id[1] = xe_eudebug_client_metadata_create(c, fd,
+							   DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
+							   2 * sizeof(*metadata), metadata[1]);
+
+	/* Long Running mode and Pagefault mode (recoverable pagefault) */
+	vm_flags |= (DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE);
+	create.vm_id = xe_eudebug_client_vm_create(c, fd, vm_flags, 0);
+
+	xe_eudebug_client_exec_queue_create(c, fd, &create);
+
+	ibb = xe_bb_create_on_offset(fd, create.exec_queue_id, create.vm_id,
+				     bb_offset, bb_size,
+				     get_memory_region(fd, c->flags, BB_REGION_BITMASK));
+	intel_bb_set_lr_mode(ibb, true);
+
+	sip = get_sip(data);
+	shader = get_shader(data);
+	igt_nsec_elapsed(&ts);
+	intel_bb_print(ibb);
+
+	data->w_dim = w_dim;
+	data->thread_resumed = 0;
+
+	gpgpu_shader_exec(ibb, buf, w_dim.x, w_dim.y, shader, sip, 0, 0);
+
+	gpgpu_shader_destroy(sip);
+	gpgpu_shader_destroy(shader);
+
+	intel_bb_sync(ibb);
+
+	ptr = xe_bo_mmap_ext(fd, buf->handle, buf->size, PROT_READ);
+
+	/* ptr[1] => sip_arf_dump.dw01 holds eu thread's cr0.2 (aip_low) */
+	aip = ptr[1];
+
+	print_debug_surface(ptr, w_dim);
+
+	/* offset 1 holds cr0.2 (aip) */
+	data->thread_hit_count = count_canaries_neq_for_e64(ptr, w_dim, elm_count, 1, 0);
+	igt_assert_eq(count_canaries_eq_for_e64(ptr, w_dim, elm_count, 1, aip),
+		      data->thread_hit_count);
+	igt_debug("pagefault hit in %d threads, AIP=0x%08x\n",
+		  data->thread_hit_count, aip);
+
+	munmap(ptr, buf->size);
+
+	intel_bb_destroy(ibb);
+
+	xe_eudebug_client_exec_queue_destroy(c, fd, &create);
+	xe_eudebug_client_vm_destroy(c, fd,  create.vm_id);
+
+	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[0], DRM_XE_DEBUG_METADATA_ELF_BINARY,
+					   2 * sizeof(*metadata));
+	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[1],
+					   DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
+					   2 * sizeof(*metadata));
+
+	xe_device_put(fd);
 	xe_eudebug_client_close_driver(c, fd);
 }
 
@@ -1929,6 +2506,10 @@ static void test_pagefault_online(int fd, struct drm_xe_engine_class_instance *h
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
+	const uint32_t id = intel_get_drm_devid(fd);
+
+	igt_require_f(intel_gen(id) < 35,
+		      "Pagefault WA test requires older than Xe3p.\n");
 
 	data = online_debug_data_create(fd, hwe, flags);
 	if (flags & SHADER_PAGEFAULT_ONE_OF_MANY) {
@@ -2018,6 +2599,65 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
 	igt_assert_f(data->last_eu_control_seqno != 0,
 		     "Workload with breakpoint has ended without resume!\n");
 
+	online_debug_data_destroy(data);
+}
+
+/**
+ * SUBTEST: pagefault-read
+ * Description:
+ *	Check whether read (EU thread's load instruction) pagefault memory exception
+ *	handling flow works or not
+ *
+ * SUBTEST: pagefault-write
+ * Description:
+ *	Check whether write (EU thread's store instruction) pagefault memory exception
+ *	handling flow works or not
+ *
+ * SUBTEST: pagefault-atomic-read
+ * Description:
+ *	Check whether atomic read (EU thread's atomic inc instruction) pagefault
+ *	memory exception handling flow works or not
+ *
+ * SUBTEST: pagefault-atomic-write
+ * Description:
+ *	Check whether read (EU thread's atomic store instruction) pagefault memory
+ *	exception handling flow works or not
+ */
+static void test_basic_online_for_e64(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
+{
+	struct xe_eudebug_session *s;
+	struct online_debug_data *data;
+
+	const uint32_t id = intel_get_drm_devid(fd);
+	igt_require_f(intel_gen(id) >= 35,
+		      "Pagefault memory exception test requires Xe3p or higher.\n");
+
+	data = online_debug_data_create(fd, hwe, flags);
+	s = xe_eudebug_session_create(fd, run_online_client_for_e64, flags, data);
+
+	/* Per context debug */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_e64_resume_trigger);
+
+	/* for e64 pagefault read testcase */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+					open_trigger);
+	/* for DRM_XE_EUDEBUG_IOCTL_VM_OPEN */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	/* to get the target_offset that indicates the ppgtt address of debug surface */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+					create_metadata_trigger);
+
+	/* Long Running mode and Pagefault mode of vm requies to ack ufenc for vm_bind */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+					ufence_ack_trigger);
+	xe_eudebug_session_run(s);
+
+	online_session_check(s);
+
+	xe_eudebug_session_destroy(s);
 	online_debug_data_destroy(data);
 }
 
@@ -3023,12 +3663,14 @@ int igt_main()
 	int fd, num_gt;
 	uint16_t engine_class = 0xFFFF;
 	uint32_t preempt_timeout = 0xFFFFFFFF;
+	int gen;
 
 	igt_fixture() {
 		fd = drm_open_driver(DRIVER_XE);
 		intel_allocator_multiprocess_start();
 		igt_srandom();
 		was_enabled = xe_eudebug_enable(fd, true);
+		gen = intel_gen(intel_get_drm_devid(fd));
 	}
 
 	test_gt_render_or_compute("basic-breakpoint", fd, hwe)
@@ -3164,12 +3806,28 @@ int igt_main()
 
 		igt_subtest("interrupt-one-of-many-contexts")
 			test_interrupt_one_of_many_contexts(fd);
-       }
+	}
 
-	test_gt_render_or_compute("pagefault-read", fd, hwe)
-		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_READ);
-	test_gt_render_or_compute("pagefault-write", fd, hwe)
-		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_WRITE);
+	test_gt_render_or_compute("pagefault-read", fd, hwe) {
+		if (gen < 35)
+			test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_READ);
+		else
+			test_basic_online_for_e64(fd, hwe, SHADER_PAGEFAULT_READ);
+	}
+
+	test_gt_render_or_compute("pagefault-write", fd, hwe) {
+		if (gen < 35)
+			test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_WRITE);
+		else
+			test_basic_online_for_e64(fd, hwe, SHADER_PAGEFAULT_WRITE);
+	}
+
+	test_gt_render_or_compute("pagefault-atomic-read", fd, hwe)
+		test_basic_online_for_e64(fd, hwe, SHADER_PAGEFAULT_ATOMIC_READ);
+
+	test_gt_render_or_compute("pagefault-atomic-write", fd, hwe)
+		test_basic_online_for_e64(fd, hwe, SHADER_PAGEFAULT_ATOMIC_WRITE);
+
 	test_gt_render_or_compute("pagefault-read-stress", fd, hwe)
 		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_READ | PAGEFAULT_STRESS_TEST);
 	test_gt_render_or_compute("pagefault-write-stress", fd, hwe)
