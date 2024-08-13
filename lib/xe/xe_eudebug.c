@@ -30,7 +30,7 @@ struct seqno_list_entry {
 };
 
 struct match_dto {
-	struct drm_xe_eudebug_event *target;
+	struct prelim_drm_xe_eudebug_event *target;
 	struct igt_list_head *seqno_list;
 	uint64_t client_handle;
 	uint32_t filter;
@@ -74,38 +74,38 @@ static const char *token_to_str(uint64_t token)
 static const char *type_to_str(unsigned int type)
 {
 	switch (type) {
-	case DRM_XE_EUDEBUG_EVENT_NONE:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_NONE:
 		return "none";
-	case DRM_XE_EUDEBUG_EVENT_READ:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_READ:
 		return "read";
-	case DRM_XE_EUDEBUG_EVENT_OPEN:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN:
 		return "client";
-	case DRM_XE_EUDEBUG_EVENT_VM:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM:
 		return "vm";
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE:
 		return "exec_queue";
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS:
 		return "exec_queue_placements";
-	case DRM_XE_EUDEBUG_EVENT_EU_ATTENTION:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION:
 		return "attention";
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND:
 		return "vm_bind";
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP:
 		return "vm_bind_op";
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE:
 		return "vm_bind_ufence";
-	case DRM_XE_EUDEBUG_EVENT_METADATA:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA:
 		return "metadata";
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA:
 		return "vm_bind_op_metadata";
-	case DRM_XE_EUDEBUG_EVENT_PAGEFAULT:
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT:
 		return "pagefault";
 	}
 
 	return "UNKNOWN";
 }
 
-static const char *event_type_to_str(struct drm_xe_eudebug_event *e, char *buf)
+static const char *event_type_to_str(struct prelim_drm_xe_eudebug_event *e, char *buf)
 {
 	sprintf(buf, "%s(%d)", type_to_str(e->type), e->type);
 
@@ -114,41 +114,41 @@ static const char *event_type_to_str(struct drm_xe_eudebug_event *e, char *buf)
 
 static const char *flags_to_str(unsigned int flags)
 {
-	if (flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
-		if (flags & DRM_XE_EUDEBUG_EVENT_NEED_ACK)
+	if (flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
+		if (flags & PRELIM_DRM_XE_EUDEBUG_EVENT_NEED_ACK)
 			return "create|ack";
 		else
 			return "create";
 	}
-	if (flags & DRM_XE_EUDEBUG_EVENT_DESTROY)
+	if (flags & PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY)
 		return "destroy";
 
-	if (flags & DRM_XE_EUDEBUG_EVENT_STATE_CHANGE)
+	if (flags & PRELIM_DRM_XE_EUDEBUG_EVENT_STATE_CHANGE)
 		return "state-change";
 
-	igt_assert(!(flags & DRM_XE_EUDEBUG_EVENT_NEED_ACK));
+	igt_assert(!(flags & PRELIM_DRM_XE_EUDEBUG_EVENT_NEED_ACK));
 
 	return "flags unknown";
 }
 
-static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *buf)
+static const char *event_members_to_str(struct prelim_drm_xe_eudebug_event *e, char *buf)
 {
 	switch (e->type) {
-	case DRM_XE_EUDEBUG_EVENT_OPEN: {
-		struct drm_xe_eudebug_event_client *ec = igt_container_of(e, ec, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN: {
+		struct prelim_drm_xe_eudebug_event_client *ec = igt_container_of(e, ec, base);
 
 		sprintf(buf, "handle=%llu", ec->client_handle);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM: {
-		struct drm_xe_eudebug_event_vm *evm = igt_container_of(e, evm, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM: {
+		struct prelim_drm_xe_eudebug_event_vm *evm = igt_container_of(e, evm, base);
 
 		sprintf(buf, "client_handle=%llu, handle=%llu",
 			evm->client_handle, evm->vm_handle);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
-		struct drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
+		struct prelim_drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
 
 		sprintf(buf, "client_handle=%llu, vm_handle=%llu, "
 			"exec_queue_handle=%llu, engine_class=%d, exec_queue_width=%d",
@@ -156,8 +156,8 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
 			ee->exec_queue_handle, ee->engine_class, ee->width);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
-		struct drm_xe_eudebug_event_exec_queue_placements *ee = igt_container_of(e, ee,
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
+		struct prelim_drm_xe_eudebug_event_exec_queue_placements *ee = igt_container_of(e, ee,
 											 base);
 		struct drm_xe_engine_class_instance *instances = (void *)(ee->instances);
 		int i, l;
@@ -177,8 +177,8 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
 
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EU_ATTENTION: {
-		struct drm_xe_eudebug_event_eu_attention *ea = igt_container_of(e, ea, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION: {
+		struct prelim_drm_xe_eudebug_event_eu_attention *ea = igt_container_of(e, ea, base);
 
 		sprintf(buf, "client_handle=%llu, exec_queue_handle=%llu, "
 			"lrc_handle=%llu, bitmask_size=%d",
@@ -186,42 +186,42 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
 			ea->lrc_handle, ea->bitmask_size);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND: {
-		struct drm_xe_eudebug_event_vm_bind *evmb = igt_container_of(e, evmb, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND: {
+		struct prelim_drm_xe_eudebug_event_vm_bind *evmb = igt_container_of(e, evmb, base);
 
 		sprintf(buf, "client_handle=%llu, vm_handle=%llu, flags=0x%x, num_binds=%u",
 			evmb->client_handle, evmb->vm_handle, evmb->flags, evmb->num_binds);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
-		struct drm_xe_eudebug_event_vm_bind_op *op = igt_container_of(e, op, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *op = igt_container_of(e, op, base);
 
 		sprintf(buf, "vm_bind_ref_seqno=%lld, addr=%016llx, range=%llu num_extensions=%llu",
 			op->vm_bind_ref_seqno, op->addr, op->range, op->num_extensions);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE: {
-		struct drm_xe_eudebug_event_vm_bind_ufence *f = igt_container_of(e, f, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_ufence *f = igt_container_of(e, f, base);
 
 		sprintf(buf, "vm_bind_ref_seqno=%lld", f->vm_bind_ref_seqno);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_METADATA: {
-		struct drm_xe_eudebug_event_metadata *em = igt_container_of(e, em, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA: {
+		struct prelim_drm_xe_eudebug_event_metadata *em = igt_container_of(e, em, base);
 
 		sprintf(buf, "client_handle=%llu, metadata_handle=%llu, type=%llu, len=%llu",
 			em->client_handle, em->metadata_handle, em->type, em->len);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
-		struct drm_xe_eudebug_event_vm_bind_op_metadata *op = igt_container_of(e, op, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *op = igt_container_of(e, op, base);
 
 		sprintf(buf, "vm_bind_op_ref_seqno=%lld, metadata_handle=%llu, metadata_cookie=%llu",
 			op->vm_bind_op_ref_seqno, op->metadata_handle, op->metadata_cookie);
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_PAGEFAULT: {
-		struct drm_xe_eudebug_event_pagefault *pf = igt_container_of(e, pf, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT: {
+		struct prelim_drm_xe_eudebug_event_pagefault *pf = igt_container_of(e, pf, base);
 
 		sprintf(buf, "client_handle=%llu, exec_queue_handle=%llu, "
 			"lrc_handle=%llu, bitmask_size=%d, pagefault_address=0x%llx",
@@ -246,7 +246,7 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
  *
  * Returns: the written input buffer pointed by @buf.
  */
-const char *xe_eudebug_event_to_str(struct drm_xe_eudebug_event *e, char *buf, size_t len)
+const char *xe_eudebug_event_to_str(struct prelim_drm_xe_eudebug_event *e, char *buf, size_t len)
 {
 	char a[256];
 	char b[256];
@@ -415,13 +415,13 @@ static void client_signal(struct xe_eudebug_client *c,
 
 static int __xe_eudebug_connect(int fd, pid_t pid, uint32_t flags, uint64_t events)
 {
-	struct drm_xe_eudebug_connect param = {
+	struct prelim_drm_xe_eudebug_connect param = {
 		.pid = pid,
 		.flags = flags,
 	};
 	int debugfd;
 
-	debugfd = igt_ioctl(fd, DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
+	debugfd = igt_ioctl(fd, PRELIM_DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
 
 	if (debugfd < 0)
 		return -errno;
@@ -462,15 +462,15 @@ static void event_log_read_from_fd(struct xe_eudebug_event_log *l, int fd)
 	read_all(fd, l->log, l->head);
 }
 
-typedef int (*cmp_fn_t)(struct drm_xe_eudebug_event *, void *);
+typedef int (*cmp_fn_t)(struct prelim_drm_xe_eudebug_event *, void *);
 
-static struct drm_xe_eudebug_event *
+static struct prelim_drm_xe_eudebug_event *
 event_cmp(struct xe_eudebug_event_log *l,
-	  struct drm_xe_eudebug_event *current,
+	  struct prelim_drm_xe_eudebug_event *current,
 	  cmp_fn_t match,
 	  void *data)
 {
-	struct drm_xe_eudebug_event *e = current;
+	struct prelim_drm_xe_eudebug_event *e = current;
 
 	xe_eudebug_for_each_event(e, l) {
 		if (match(e, data))
@@ -480,9 +480,9 @@ event_cmp(struct xe_eudebug_event_log *l,
 	return NULL;
 }
 
-static int match_type_and_flags(struct drm_xe_eudebug_event *a, void *data)
+static int match_type_and_flags(struct prelim_drm_xe_eudebug_event *a, void *data)
 {
-	struct drm_xe_eudebug_event *b = data;
+	struct prelim_drm_xe_eudebug_event *b = data;
 
 	if (a->type == b->type &&
 	    a->flags == b->flags)
@@ -491,9 +491,9 @@ static int match_type_and_flags(struct drm_xe_eudebug_event *a, void *data)
 	return 0;
 }
 
-static int match_fields(struct drm_xe_eudebug_event *a, void *data)
+static int match_fields(struct prelim_drm_xe_eudebug_event *a, void *data)
 {
-	struct drm_xe_eudebug_event *b = data;
+	struct prelim_drm_xe_eudebug_event *b = data;
 	int ret = 0;
 
 	ret = match_type_and_flags(a, data);
@@ -503,18 +503,18 @@ static int match_fields(struct drm_xe_eudebug_event *a, void *data)
 	ret = 0;
 
 	switch (a->type) {
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
-		struct drm_xe_eudebug_event_exec_queue *ae = igt_container_of(a, ae, base);
-		struct drm_xe_eudebug_event_exec_queue *be = igt_container_of(b, be, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
+		struct prelim_drm_xe_eudebug_event_exec_queue *ae = igt_container_of(a, ae, base);
+		struct prelim_drm_xe_eudebug_event_exec_queue *be = igt_container_of(b, be, base);
 
 		if (ae->engine_class == be->engine_class && ae->width == be->width)
 			ret = 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
-		struct drm_xe_eudebug_event_exec_queue_placements *ae = igt_container_of(a, ae,
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
+		struct prelim_drm_xe_eudebug_event_exec_queue_placements *ae = igt_container_of(a, ae,
 											 base);
-		struct drm_xe_eudebug_event_exec_queue_placements *be = igt_container_of(b, be,
+		struct prelim_drm_xe_eudebug_event_exec_queue_placements *be = igt_container_of(b, be,
 											 base);
 
 		if (ae->num_placements == be->num_placements &&
@@ -524,26 +524,26 @@ static int match_fields(struct drm_xe_eudebug_event *a, void *data)
 
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND: {
-		struct drm_xe_eudebug_event_vm_bind *ea = igt_container_of(a, ea, base);
-		struct drm_xe_eudebug_event_vm_bind *eb = igt_container_of(b, eb, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND: {
+		struct prelim_drm_xe_eudebug_event_vm_bind *ea = igt_container_of(a, ea, base);
+		struct prelim_drm_xe_eudebug_event_vm_bind *eb = igt_container_of(b, eb, base);
 
 		if (ea->num_binds == eb->num_binds)
 			ret = 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
-		struct drm_xe_eudebug_event_vm_bind_op *ea = igt_container_of(a, ea, base);
-		struct drm_xe_eudebug_event_vm_bind_op *eb = igt_container_of(b, eb, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *ea = igt_container_of(a, ea, base);
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *eb = igt_container_of(b, eb, base);
 
 		if (ea->addr == eb->addr && ea->range == eb->range &&
 		    ea->num_extensions == eb->num_extensions)
 			ret = 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
-		struct drm_xe_eudebug_event_vm_bind_op_metadata *ea = igt_container_of(a, ea, base);
-		struct drm_xe_eudebug_event_vm_bind_op_metadata *eb = igt_container_of(b, eb, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *ea = igt_container_of(a, ea, base);
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *eb = igt_container_of(b, eb, base);
 
 		if (ea->metadata_handle == eb->metadata_handle &&
 		    ea->metadata_cookie == eb->metadata_cookie)
@@ -559,7 +559,7 @@ static int match_fields(struct drm_xe_eudebug_event *a, void *data)
 	return ret;
 }
 
-static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
+static int match_client_handle(struct prelim_drm_xe_eudebug_event *e, void *data)
 {
 	struct match_dto *md = data;
 	uint64_t *bind_seqno = md->bind_seqno;
@@ -570,37 +570,37 @@ static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
 		return 0;
 
 	switch (e->type) {
-	case DRM_XE_EUDEBUG_EVENT_OPEN: {
-		struct drm_xe_eudebug_event_client *client = igt_container_of(e, client, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN: {
+		struct prelim_drm_xe_eudebug_event_client *client = igt_container_of(e, client, base);
 
 		if (client->client_handle == h)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM: {
-		struct drm_xe_eudebug_event_vm *vm = igt_container_of(e, vm, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM: {
+		struct prelim_drm_xe_eudebug_event_vm *vm = igt_container_of(e, vm, base);
 
 		if (vm->client_handle == h)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
-	struct drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
+		struct prelim_drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
 
 		if (ee->client_handle == h)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
-		struct drm_xe_eudebug_event_exec_queue_placements *ee = igt_container_of(e, ee,
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
+		struct prelim_drm_xe_eudebug_event_exec_queue_placements *ee = igt_container_of(e, ee,
 											 base);
 
 		if (ee->client_handle == h)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND: {
-		struct drm_xe_eudebug_event_vm_bind *evmb = igt_container_of(e, evmb, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND: {
+		struct prelim_drm_xe_eudebug_event_vm_bind *evmb = igt_container_of(e, evmb, base);
 
 		if (evmb->client_handle == h) {
 			*bind_seqno = evmb->base.seqno;
@@ -608,8 +608,8 @@ static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
 		}
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
-		struct drm_xe_eudebug_event_vm_bind_op *eo = igt_container_of(e, eo, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *eo = igt_container_of(e, eo, base);
 
 		if (eo->vm_bind_ref_seqno == *bind_seqno) {
 			*bind_op_seqno = eo->base.seqno;
@@ -617,23 +617,23 @@ static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
 		}
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE: {
-		struct drm_xe_eudebug_event_vm_bind_ufence *ef = igt_container_of(e, ef, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_ufence *ef = igt_container_of(e, ef, base);
 
 		if (ef->vm_bind_ref_seqno == *bind_seqno)
 			return 1;
 
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_METADATA: {
-		struct drm_xe_eudebug_event_metadata *em = igt_container_of(e, em, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA: {
+		struct prelim_drm_xe_eudebug_event_metadata *em = igt_container_of(e, em, base);
 
 		if (em->client_handle == h)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
-		struct drm_xe_eudebug_event_vm_bind_op_metadata *eo = igt_container_of(e, eo, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *eo = igt_container_of(e, eo, base);
 
 		if (eo->vm_bind_op_ref_seqno == *bind_op_seqno)
 			return 1;
@@ -646,74 +646,74 @@ static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
 	return 0;
 }
 
-static int match_opposite_resource(struct drm_xe_eudebug_event *e, void *data)
+static int match_opposite_resource(struct prelim_drm_xe_eudebug_event *e, void *data)
 {
-	struct drm_xe_eudebug_event *d = data;
+	struct prelim_drm_xe_eudebug_event *d = data;
 	int ret;
 
-	d->flags ^= DRM_XE_EUDEBUG_EVENT_CREATE | DRM_XE_EUDEBUG_EVENT_DESTROY;
-	d->flags &= ~(DRM_XE_EUDEBUG_EVENT_NEED_ACK);
+	d->flags ^= PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE | PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY;
+	d->flags &= ~(PRELIM_DRM_XE_EUDEBUG_EVENT_NEED_ACK);
 	ret = match_type_and_flags(e, data);
-	d->flags ^= DRM_XE_EUDEBUG_EVENT_CREATE | DRM_XE_EUDEBUG_EVENT_DESTROY;
+	d->flags ^= PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE | PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY;
 
 	if (!ret)
 		return 0;
 
 	switch (e->type) {
-	case DRM_XE_EUDEBUG_EVENT_OPEN: {
-		struct drm_xe_eudebug_event_client *client = igt_container_of(e, client, base);
-		struct drm_xe_eudebug_event_client *filter = data;
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN: {
+		struct prelim_drm_xe_eudebug_event_client *client = igt_container_of(e, client, base);
+		struct prelim_drm_xe_eudebug_event_client *filter = data;
 
 		if (client->client_handle == filter->client_handle)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM: {
-		struct drm_xe_eudebug_event_vm *vm = igt_container_of(e, vm, base);
-		struct drm_xe_eudebug_event_vm *filter = data;
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM: {
+		struct prelim_drm_xe_eudebug_event_vm *vm = igt_container_of(e, vm, base);
+		struct prelim_drm_xe_eudebug_event_vm *filter = data;
 
 		if (vm->vm_handle == filter->vm_handle)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
-		struct drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
-		struct drm_xe_eudebug_event_exec_queue *filter = data;
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
+		struct prelim_drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
+		struct prelim_drm_xe_eudebug_event_exec_queue *filter = data;
 
 		if (ee->exec_queue_handle == filter->exec_queue_handle)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND: {
-		struct drm_xe_eudebug_event_vm_bind *evmb = igt_container_of(e, evmb, base);
-		struct drm_xe_eudebug_event_vm_bind *filter = data;
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND: {
+		struct prelim_drm_xe_eudebug_event_vm_bind *evmb = igt_container_of(e, evmb, base);
+		struct prelim_drm_xe_eudebug_event_vm_bind *filter = data;
 
 		if (evmb->vm_handle == filter->vm_handle &&
 		    evmb->num_binds == filter->num_binds)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
-		struct drm_xe_eudebug_event_vm_bind_op *avmb = igt_container_of(e, avmb, base);
-		struct drm_xe_eudebug_event_vm_bind_op *filter = data;
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *avmb = igt_container_of(e, avmb, base);
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *filter = data;
 
 		if (avmb->addr == filter->addr &&
 		    avmb->range == filter->range)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_METADATA: {
-		struct drm_xe_eudebug_event_metadata *em = igt_container_of(e, em, base);
-		struct drm_xe_eudebug_event_metadata *filter = data;
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA: {
+		struct prelim_drm_xe_eudebug_event_metadata *em = igt_container_of(e, em, base);
+		struct prelim_drm_xe_eudebug_event_metadata *filter = data;
 
 		if (em->metadata_handle == filter->metadata_handle)
 			return 1;
 		break;
 	}
-	case DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
-		struct drm_xe_eudebug_event_vm_bind_op_metadata *avmb = igt_container_of(e, avmb,
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA: {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *avmb = igt_container_of(e, avmb,
 											 base);
-		struct drm_xe_eudebug_event_vm_bind_op_metadata *filter = data;
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *filter = data;
 
 		if (avmb->metadata_handle == filter->metadata_handle &&
 		    avmb->metadata_cookie == filter->metadata_cookie)
@@ -727,7 +727,7 @@ static int match_opposite_resource(struct drm_xe_eudebug_event *e, void *data)
 	return 0;
 }
 
-static int match_full(struct drm_xe_eudebug_event *e, void *data)
+static int match_full(struct prelim_drm_xe_eudebug_event *e, void *data)
 {
 	struct seqno_list_entry *sl;
 
@@ -750,18 +750,18 @@ static int match_full(struct drm_xe_eudebug_event *e, void *data)
 	return 1;
 }
 
-static struct drm_xe_eudebug_event *
+static struct prelim_drm_xe_eudebug_event *
 event_type_match(struct xe_eudebug_event_log *l,
-		 struct drm_xe_eudebug_event *target,
-		 struct drm_xe_eudebug_event *current)
+		 struct prelim_drm_xe_eudebug_event *target,
+		 struct prelim_drm_xe_eudebug_event *current)
 {
 	return event_cmp(l, current, match_type_and_flags, target);
 }
 
-static struct drm_xe_eudebug_event *
+static struct prelim_drm_xe_eudebug_event *
 client_match(struct xe_eudebug_event_log *l,
 	     uint64_t client_handle,
-	     struct drm_xe_eudebug_event *current,
+	     struct prelim_drm_xe_eudebug_event *current,
 	     uint32_t filter,
 	     uint64_t *bind_seqno,
 	     uint64_t *bind_op_seqno)
@@ -776,17 +776,17 @@ client_match(struct xe_eudebug_event_log *l,
 	return event_cmp(l, current, match_client_handle, &md);
 }
 
-static struct drm_xe_eudebug_event *
+static struct prelim_drm_xe_eudebug_event *
 opposite_event_match(struct xe_eudebug_event_log *l,
-		     struct drm_xe_eudebug_event *target,
-		     struct drm_xe_eudebug_event *current)
+		     struct prelim_drm_xe_eudebug_event *target,
+		     struct prelim_drm_xe_eudebug_event *current)
 {
 	return event_cmp(l, current, match_opposite_resource, target);
 }
 
-static struct drm_xe_eudebug_event *
+static struct prelim_drm_xe_eudebug_event *
 event_match(struct xe_eudebug_event_log *l,
-	    struct drm_xe_eudebug_event *target,
+	    struct prelim_drm_xe_eudebug_event *target,
 	    uint64_t client_handle,
 	    struct igt_list_head *seqno_list,
 	    uint64_t *bind_seqno,
@@ -803,16 +803,16 @@ event_match(struct xe_eudebug_event_log *l,
 	return event_cmp(l, NULL, match_full, &md);
 }
 
-static void compare_client(struct xe_eudebug_event_log *log1, struct drm_xe_eudebug_event *ev1,
-			   struct xe_eudebug_event_log *log2, struct drm_xe_eudebug_event *ev2,
+static void compare_client(struct xe_eudebug_event_log *log1, struct prelim_drm_xe_eudebug_event *ev1,
+			   struct xe_eudebug_event_log *log2, struct prelim_drm_xe_eudebug_event *ev2,
 			   uint32_t filter)
 {
-	struct drm_xe_eudebug_event_client *ev1_client = igt_container_of(ev1, ev1_client, base);
-	struct drm_xe_eudebug_event_client *ev2_client = igt_container_of(ev2, ev2_client, base);
+	struct prelim_drm_xe_eudebug_event_client *ev1_client = igt_container_of(ev1, ev1_client, base);
+	struct prelim_drm_xe_eudebug_event_client *ev2_client = igt_container_of(ev2, ev2_client, base);
 	uint64_t cbs = 0, dbs = 0, cbso = 0, dbso = 0;
 
 	struct igt_list_head matched_seqno_list;
-	struct drm_xe_eudebug_event *evptr1, *evptr2;
+	struct prelim_drm_xe_eudebug_event *evptr1, *evptr2;
 	struct seqno_list_entry *entry, *tmp;
 
 	igt_assert(ev1_client);
@@ -865,10 +865,10 @@ static void compare_client(struct xe_eudebug_event_log *log1, struct drm_xe_eude
  * Returns: pointer to the event with given seqno within @l or NULL seqno is
  * not present.
  */
-struct drm_xe_eudebug_event *
+struct prelim_drm_xe_eudebug_event *
 xe_eudebug_event_log_find_seqno(struct xe_eudebug_event_log *l, uint64_t seqno)
 {
-	struct drm_xe_eudebug_event *e = NULL, *found = NULL;
+	struct prelim_drm_xe_eudebug_event *e = NULL, *found = NULL;
 
 	igt_assert(l);
 	igt_assert_neq(seqno, 0);
@@ -896,7 +896,7 @@ xe_eudebug_event_log_find_seqno(struct xe_eudebug_event_log *l, uint64_t seqno)
 static void event_log_sort(struct xe_eudebug_event_log *l)
 {
 	struct xe_eudebug_event_log *tmp;
-	struct drm_xe_eudebug_event *e = NULL;
+	struct prelim_drm_xe_eudebug_event *e = NULL;
 	uint64_t first_seqno = UINT64_MAX;
 	uint64_t last_seqno = 0;
 	uint64_t events = 0, added = 0;
@@ -1001,7 +1001,7 @@ void xe_eudebug_event_log_destroy(struct xe_eudebug_event_log *l)
  *
  * Writes event @e to the event log, thread-safe.
  */
-void xe_eudebug_event_log_write(struct xe_eudebug_event_log *l, struct drm_xe_eudebug_event *e)
+void xe_eudebug_event_log_write(struct xe_eudebug_event_log *l, struct prelim_drm_xe_eudebug_event *e)
 {
 	igt_assert(l);
 	igt_assert(e);
@@ -1029,7 +1029,7 @@ void xe_eudebug_event_log_write(struct xe_eudebug_event_log *l, struct drm_xe_eu
 void
 xe_eudebug_event_log_print(struct xe_eudebug_event_log *l, bool debug)
 {
-	struct drm_xe_eudebug_event *e = NULL;
+	struct prelim_drm_xe_eudebug_event *e = NULL;
 	int level = debug ? IGT_LOG_DEBUG : IGT_LOG_INFO;
 	char str[XE_EUDEBUG_EVENT_STRING_MAX_LEN];
 
@@ -1050,7 +1050,7 @@ xe_eudebug_event_log_print(struct xe_eudebug_event_log *l, bool debug)
  * @b: event log pointer
  * @filter: mask that represents events to be skipped during comparison, useful
  * for events like 'VM_BIND' since they can be asymmetric. Note that
- * 'DRM_XE_EUDEBUG_EVENT_OPEN' will always be matched.
+ * 'PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN' will always be matched.
  *
  * Compares and asserts event logs @a, @b if the event
  * sequence matches.
@@ -1059,15 +1059,15 @@ void xe_eudebug_event_log_compare(struct xe_eudebug_event_log *log1,
 				  struct xe_eudebug_event_log *log2,
 				  uint32_t filter)
 {
-	struct drm_xe_eudebug_event *ev1 = NULL;
-	struct drm_xe_eudebug_event *ev2 = NULL;
+	struct prelim_drm_xe_eudebug_event *ev1 = NULL;
+	struct prelim_drm_xe_eudebug_event *ev2 = NULL;
 
 	igt_assert(log1);
 	igt_assert(log2);
 
 	xe_eudebug_for_each_event(ev1, log1) {
-		if (ev1->type == DRM_XE_EUDEBUG_EVENT_OPEN &&
-		    ev1->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
+		if (ev1->type == PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN &&
+		    ev1->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
 			ev2 = event_type_match(log2, ev1, ev2);
 
 			compare_client(log1, ev1, log2, ev2, filter);
@@ -1087,24 +1087,24 @@ void xe_eudebug_event_log_compare(struct xe_eudebug_event_log *log1,
 void
 xe_eudebug_event_log_match_opposite(struct xe_eudebug_event_log *l, uint32_t filter)
 {
-	struct drm_xe_eudebug_event *ev1 = NULL;
-	struct drm_xe_eudebug_event *ev2 = NULL;
+	struct prelim_drm_xe_eudebug_event *ev1 = NULL;
+	struct prelim_drm_xe_eudebug_event *ev2 = NULL;
 
 	igt_assert(l);
 
 	xe_eudebug_for_each_event(ev1, l) {
-		if (ev1->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
-			uint8_t offset = sizeof(struct drm_xe_eudebug_event);
+		if (ev1->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
+			uint8_t offset = sizeof(struct prelim_drm_xe_eudebug_event);
 			int opposite_matching;
 
 			if (XE_EUDEBUG_EVENT_IS_FILTERED(ev1->type, filter))
 				continue;
 
 			/* No opposite matching for some events */
-			if ((ev1->type >= DRM_XE_EUDEBUG_EVENT_VM_BIND &&
-			     ev1->type <= DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE) ||
-			    ev1->type == DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA ||
-			    ev1->type == DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS)
+			if ((ev1->type >= PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND &&
+			     ev1->type <= PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE) ||
+			    ev1->type == PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA ||
+			    ev1->type == PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS)
 				continue;
 
 			ev2 = opposite_event_match(l, ev1, ev1);
@@ -1124,7 +1124,7 @@ xe_eudebug_event_log_match_opposite(struct xe_eudebug_event_log *l, uint32_t fil
 }
 
 static void debugger_run_triggers(struct xe_eudebug_debugger *d,
-				  struct drm_xe_eudebug_event *e)
+				  struct prelim_drm_xe_eudebug_event *e)
 {
 	struct event_trigger *t;
 
@@ -1135,15 +1135,15 @@ static void debugger_run_triggers(struct xe_eudebug_debugger *d,
 }
 
 static int
-xe_eudebug_read_event(int fd, struct drm_xe_eudebug_event *event)
+xe_eudebug_read_event(int fd, struct prelim_drm_xe_eudebug_event *event)
 {
 	int ret;
 
-	event->type = DRM_XE_EUDEBUG_EVENT_READ;
+	event->type = PRELIM_DRM_XE_EUDEBUG_EVENT_READ;
 	event->flags = 0;
 	event->len = MAX_EVENT_SIZE;
 
-	ret = igt_ioctl(fd, DRM_XE_EUDEBUG_IOCTL_READ_EVENT, event);
+	ret = igt_ioctl(fd, PRELIM_DRM_XE_EUDEBUG_IOCTL_READ_EVENT, event);
 	if (ret < 0)
 		return -errno;
 
@@ -1165,7 +1165,7 @@ static void debugger_signal_handler(int sig, siginfo_t *info, void *context)
 static void *debugger_worker_loop(void *data)
 {
 	uint8_t buf[MAX_EVENT_SIZE];
-	struct drm_xe_eudebug_event *e = (void *)buf;
+	struct prelim_drm_xe_eudebug_event *e = (void *)buf;
 	struct xe_eudebug_debugger *d = data;
 	struct pollfd p = {
 		.events = POLLIN,
@@ -1234,10 +1234,10 @@ static void *debugger_worker_loop(void *data)
  */
 bool xe_eudebug_debugger_available(int fd)
 {
-	struct drm_xe_eudebug_connect param = { .pid = getpid() };
+	struct prelim_drm_xe_eudebug_connect param = { .pid = getpid() };
 	int debugfd;
 
-	debugfd = igt_ioctl(fd, DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
+	debugfd = igt_ioctl(fd, PRELIM_DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
 	if (debugfd >= 0)
 		close(debugfd);
 
@@ -1796,10 +1796,10 @@ void xe_eudebug_session_destroy(struct xe_eudebug_session *s)
 	free(s);
 }
 
-#define to_base(x) ((struct drm_xe_eudebug_event *)&(x))
+#define to_base(x) ((struct prelim_drm_xe_eudebug_event *)&(x))
 
 static void base_event(struct xe_eudebug_client *c,
-		       struct drm_xe_eudebug_event *e,
+		       struct prelim_drm_xe_eudebug_event *e,
 		       uint32_t type,
 		       uint32_t flags,
 		       uint64_t size)
@@ -1812,9 +1812,9 @@ static void base_event(struct xe_eudebug_client *c,
 
 static void client_event(struct xe_eudebug_client *c, uint32_t flags, int client_fd)
 {
-	struct drm_xe_eudebug_event_client ec;
+	struct prelim_drm_xe_eudebug_event_client ec;
 
-	base_event(c, to_base(ec), DRM_XE_EUDEBUG_EVENT_OPEN, flags, sizeof(ec));
+	base_event(c, to_base(ec), PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN, flags, sizeof(ec));
 
 	ec.client_handle = client_fd;
 
@@ -1823,9 +1823,9 @@ static void client_event(struct xe_eudebug_client *c, uint32_t flags, int client
 
 static void vm_event(struct xe_eudebug_client *c, uint32_t flags, int client_fd, uint32_t vm_id)
 {
-	struct drm_xe_eudebug_event_vm evm;
+	struct prelim_drm_xe_eudebug_event_vm evm;
 
-	base_event(c, to_base(evm), DRM_XE_EUDEBUG_EVENT_VM, flags, sizeof(evm));
+	base_event(c, to_base(evm), PRELIM_DRM_XE_EUDEBUG_EVENT_VM, flags, sizeof(evm));
 
 	evm.client_handle = client_fd;
 	evm.vm_handle = vm_id;
@@ -1838,9 +1838,9 @@ static void exec_queue_event(struct xe_eudebug_client *c, uint32_t flags,
 			     uint32_t exec_queue_handle, uint16_t class,
 			     uint16_t width)
 {
-	struct drm_xe_eudebug_event_exec_queue ee;
+	struct prelim_drm_xe_eudebug_event_exec_queue ee;
 
-	base_event(c, to_base(ee), DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	base_event(c, to_base(ee), PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 		   flags, sizeof(ee));
 
 	ee.client_handle = client_fd;
@@ -1859,15 +1859,15 @@ static void exec_queue_placements_event(struct xe_eudebug_client *c,
 					uint16_t num_placements,
 					struct drm_xe_engine_class_instance *eci)
 {
-	struct drm_xe_eudebug_event_exec_queue_placements *ee;
+	struct prelim_drm_xe_eudebug_event_exec_queue_placements *ee;
 	struct drm_xe_engine_class_instance *instances;
 	size_t sz = sizeof(*ee) + num_placements * sizeof(uint64_t);
 
 	ee = calloc(1, sz);
 	igt_assert(ee);
 
-	base_event(c, to_base(*ee), DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS,
-		   DRM_XE_EUDEBUG_EVENT_CREATE, sz);
+	base_event(c, to_base(*ee), PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS,
+		   PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE, sz);
 
 	ee->client_handle = client_fd;
 	ee->vm_handle = vm_id;
@@ -1885,9 +1885,9 @@ static void exec_queue_placements_event(struct xe_eudebug_client *c,
 static void metadata_event(struct xe_eudebug_client *c, uint32_t flags,
 			   int client_fd, uint32_t id, uint64_t type, uint64_t len)
 {
-	struct drm_xe_eudebug_event_metadata em;
+	struct prelim_drm_xe_eudebug_event_metadata em;
 
-	base_event(c, to_base(em), DRM_XE_EUDEBUG_EVENT_METADATA,
+	base_event(c, to_base(em), PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 		   flags, sizeof(em));
 
 	em.client_handle = client_fd;
@@ -1911,7 +1911,7 @@ static void metadata_event(struct xe_eudebug_client *c, uint32_t flags,
  */
 int __xe_eudebug_enable_getset(int fd, bool *old, bool *new)
 {
-	static const char * const fname = "enable_eudebug";
+	static const char * const fname = "prelim_enable_eudebug";
 	int ret = 0;
 	int sysfs, device_fd;
 	bool val_before;
@@ -1990,7 +1990,7 @@ int xe_eudebug_client_open_driver(struct xe_eudebug_client *c)
 
 	igt_assert(c);
 	fd = drm_reopen_driver(c->master_fd);
-	client_event(c, DRM_XE_EUDEBUG_EVENT_CREATE, fd);
+	client_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE, fd);
 
 	return fd;
 }
@@ -2006,7 +2006,7 @@ int xe_eudebug_client_open_driver(struct xe_eudebug_client *c)
 void xe_eudebug_client_close_driver(struct xe_eudebug_client *c, int fd)
 {
 	igt_assert(c);
-	client_event(c, DRM_XE_EUDEBUG_EVENT_DESTROY, fd);
+	client_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY, fd);
 	drm_close_driver(fd);
 }
 
@@ -2029,7 +2029,7 @@ uint32_t xe_eudebug_client_vm_create(struct xe_eudebug_client *c, int fd,
 
 	igt_assert(c);
 	vm = xe_vm_create(fd, flags, ext);
-	vm_event(c, DRM_XE_EUDEBUG_EVENT_CREATE, fd, vm);
+	vm_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE, fd, vm);
 
 	return vm;
 }
@@ -2047,7 +2047,7 @@ void xe_eudebug_client_vm_destroy(struct xe_eudebug_client *c, int fd, uint32_t 
 {
 	igt_assert(c);
 	xe_vm_destroy(fd, vm);
-	vm_event(c, DRM_XE_EUDEBUG_EVENT_DESTROY, fd, vm);
+	vm_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY, fd, vm);
 }
 
 /**
@@ -2080,12 +2080,12 @@ uint32_t xe_eudebug_client_exec_queue_create(struct xe_eudebug_client *c, int fd
 	for (ext = from_user_pointer(create->extensions); ext;
 	     ext = from_user_pointer(ext->base.next_extension))
 		if (ext->base.name == DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY &&
-		    ext->property == DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG &&
-		    ext->value & DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE)
+		    ext->property == PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG &&
+		    ext->value & PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE)
 			send = true;
 
 	if (send) {
-		exec_queue_event(c, DRM_XE_EUDEBUG_EVENT_CREATE, fd, create->vm_id,
+		exec_queue_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE, fd, create->vm_id,
 				 create->exec_queue_id, class, create->width);
 
 		for (int i = 0; i < create->width; i++) {
@@ -2127,12 +2127,12 @@ void xe_eudebug_client_exec_queue_destroy(struct xe_eudebug_client *c, int fd,
 	for (ext = from_user_pointer(create->extensions); ext;
 	     ext = from_user_pointer(ext->base.next_extension))
 		if (ext->base.name == DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY &&
-		    ext->property == DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG &&
-		    ext->value & DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE)
+		    ext->property == PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG &&
+		    ext->value & PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE)
 			send = true;
 
 	if (send)
-		exec_queue_event(c, DRM_XE_EUDEBUG_EVENT_DESTROY, fd, create->vm_id,
+		exec_queue_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY, fd, create->vm_id,
 				 create->exec_queue_id, class, create->width);
 
 	igt_assert_eq(igt_ioctl(fd, DRM_IOCTL_XE_EXEC_QUEUE_DESTROY, &destroy), 0);
@@ -2154,12 +2154,12 @@ void xe_eudebug_client_vm_bind_event(struct xe_eudebug_client *c,
 				     uint32_t vm, uint32_t bind_flags,
 				     uint32_t num_binds, u64 *ref_seqno)
 {
-	struct drm_xe_eudebug_event_vm_bind evmb;
+	struct prelim_drm_xe_eudebug_event_vm_bind evmb;
 
 	igt_assert(c);
 	igt_assert(ref_seqno);
 
-	base_event(c, to_base(evmb), DRM_XE_EUDEBUG_EVENT_VM_BIND,
+	base_event(c, to_base(evmb), PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND,
 		   event_flags, sizeof(evmb));
 	evmb.client_handle = fd;
 	evmb.vm_handle = vm;
@@ -2188,12 +2188,12 @@ void xe_eudebug_client_vm_bind_op_event(struct xe_eudebug_client *c, uint32_t ev
 					uint64_t addr, uint64_t range,
 					uint64_t num_extensions)
 {
-	struct drm_xe_eudebug_event_vm_bind_op op;
+	struct prelim_drm_xe_eudebug_event_vm_bind_op op;
 
 	igt_assert(c);
 	igt_assert(op_ref_seqno);
 
-	base_event(c, to_base(op), DRM_XE_EUDEBUG_EVENT_VM_BIND_OP,
+	base_event(c, to_base(op), PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP,
 		   event_flags, sizeof(op));
 	op.vm_bind_ref_seqno = bind_ref_seqno;
 	op.addr = addr;
@@ -2219,11 +2219,11 @@ void xe_eudebug_client_vm_bind_op_metadata_event(struct xe_eudebug_client *c,
 						 uint32_t event_flags, uint64_t op_ref_seqno,
 						 uint64_t metadata_handle, uint64_t metadata_cookie)
 {
-	struct drm_xe_eudebug_event_vm_bind_op_metadata op;
+	struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata op;
 
 	igt_assert(c);
 
-	base_event(c, to_base(op), DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA,
+	base_event(c, to_base(op), PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA,
 		   event_flags, sizeof(op));
 	op.vm_bind_op_ref_seqno = op_ref_seqno;
 	op.metadata_handle = metadata_handle;
@@ -2243,11 +2243,11 @@ void xe_eudebug_client_vm_bind_op_metadata_event(struct xe_eudebug_client *c,
 void xe_eudebug_client_vm_bind_ufence_event(struct xe_eudebug_client *c, uint32_t event_flags,
 					    uint64_t ref_seqno)
 {
-	struct drm_xe_eudebug_event_vm_bind_ufence f;
+	struct prelim_drm_xe_eudebug_event_vm_bind_ufence f;
 
 	igt_assert(c);
 
-	base_event(c, to_base(f), DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	base_event(c, to_base(f), PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 		   event_flags, sizeof(f));
 	f.vm_bind_ref_seqno = ref_seqno;
 
@@ -2267,7 +2267,7 @@ static bool has_user_fence(const struct drm_xe_sync *sync, uint32_t num_syncs)
 	for ((__m) = from_user_pointer(__ext);				\
 	     (__m);							\
 	     (__m) = from_user_pointer((__m)->base.next_extension))	\
-		if ((__m)->base.name == XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG)
+		if ((__m)->base.name == PRELIM_XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG)
 
 static int  __xe_eudebug_client_vm_bind(struct xe_eudebug_client *c,
 					int fd, uint32_t vm, uint32_t exec_queue,
@@ -2279,10 +2279,10 @@ static int  __xe_eudebug_client_vm_bind(struct xe_eudebug_client *c,
 					uint32_t prefetch_region,
 					uint8_t pat_index, uint64_t op_ext)
 {
-	struct drm_xe_vm_bind_op_ext_attach_debug *metadata;
+	struct prelim_drm_xe_vm_bind_op_ext_attach_debug *metadata;
 	const bool ufence = has_user_fence(sync, num_syncs);
 	const uint32_t bind_flags = ufence ?
-		DRM_XE_EUDEBUG_EVENT_VM_BIND_FLAG_UFENCE : 0;
+		PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_FLAG_UFENCE : 0;
 	uint64_t seqno = 0, op_seqno = 0, num_metadata = 0;
 	uint32_t bind_base_flags = 0;
 	int ret;
@@ -2292,10 +2292,10 @@ static int  __xe_eudebug_client_vm_bind(struct xe_eudebug_client *c,
 
 	switch (op) {
 	case DRM_XE_VM_BIND_OP_MAP:
-		bind_base_flags = DRM_XE_EUDEBUG_EVENT_CREATE;
+		bind_base_flags = PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE;
 		break;
 	case DRM_XE_VM_BIND_OP_UNMAP:
-		bind_base_flags = DRM_XE_EUDEBUG_EVENT_DESTROY;
+		bind_base_flags = PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY;
 		igt_assert_eq(num_metadata, 0);
 		igt_assert_eq(ufence, false);
 		break;
@@ -2315,7 +2315,7 @@ static int  __xe_eudebug_client_vm_bind(struct xe_eudebug_client *c,
 	if (!bind_base_flags)
 		return -EINVAL;
 
-	xe_eudebug_client_vm_bind_event(c, DRM_XE_EUDEBUG_EVENT_STATE_CHANGE,
+	xe_eudebug_client_vm_bind_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_STATE_CHANGE,
 					fd, vm, bind_flags, 1, &seqno);
 	xe_eudebug_client_vm_bind_op_event(c, bind_base_flags,
 					   seqno, &op_seqno, addr, size,
@@ -2323,13 +2323,13 @@ static int  __xe_eudebug_client_vm_bind(struct xe_eudebug_client *c,
 
 	for_each_metadata(metadata, op_ext)
 		xe_eudebug_client_vm_bind_op_metadata_event(c,
-							    DRM_XE_EUDEBUG_EVENT_CREATE,
+							    PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE,
 							    op_seqno,
 							    metadata->metadata_id,
 							    metadata->cookie);
 	if (ufence)
-		xe_eudebug_client_vm_bind_ufence_event(c, DRM_XE_EUDEBUG_EVENT_CREATE |
-						       DRM_XE_EUDEBUG_EVENT_NEED_ACK,
+		xe_eudebug_client_vm_bind_ufence_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE |
+						       PRELIM_DRM_XE_EUDEBUG_EVENT_NEED_ACK,
 						       seqno);
 	return ret;
 }
@@ -2469,16 +2469,16 @@ void xe_eudebug_client_vm_unbind(struct xe_eudebug_client *c, int fd, uint32_t v
 uint32_t xe_eudebug_client_metadata_create(struct xe_eudebug_client *c, int fd,
 					   int type, size_t len, void *data)
 {
-	struct drm_xe_debug_metadata_create create = {
+	struct prelim_drm_xe_debug_metadata_create create = {
 		.type = type,
 		.user_addr = to_user_pointer(data),
 		.len = len
 	};
 
 	igt_assert(c);
-	igt_assert_eq(igt_ioctl(fd, DRM_IOCTL_XE_DEBUG_METADATA_CREATE, &create), 0);
+	igt_assert_eq(igt_ioctl(fd, PRELIM_DRM_IOCTL_XE_DEBUG_METADATA_CREATE, &create), 0);
 
-	metadata_event(c, DRM_XE_EUDEBUG_EVENT_CREATE, fd, create.metadata_id, type, len);
+	metadata_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE, fd, create.metadata_id, type, len);
 
 	return create.metadata_id;
 }
@@ -2497,18 +2497,18 @@ uint32_t xe_eudebug_client_metadata_create(struct xe_eudebug_client *c, int fd,
 void xe_eudebug_client_metadata_destroy(struct xe_eudebug_client *c, int fd,
 					uint32_t id, int type, size_t len)
 {
-	struct drm_xe_debug_metadata_destroy destroy = { .metadata_id = id };
+	struct prelim_drm_xe_debug_metadata_destroy destroy = { .metadata_id = id };
 
 	igt_assert(c);
-	igt_assert_eq(igt_ioctl(fd, DRM_IOCTL_XE_DEBUG_METADATA_DESTROY, &destroy), 0);
+	igt_assert_eq(igt_ioctl(fd, PRELIM_DRM_IOCTL_XE_DEBUG_METADATA_DESTROY, &destroy), 0);
 
-	metadata_event(c, DRM_XE_EUDEBUG_EVENT_DESTROY, fd, id, type, len);
+	metadata_event(c, PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY, fd, id, type, len);
 }
 
 void xe_eudebug_ack_ufence(int debugfd,
-			   const struct drm_xe_eudebug_event_vm_bind_ufence *f)
+			   const struct prelim_drm_xe_eudebug_event_vm_bind_ufence *f)
 {
-	struct drm_xe_eudebug_ack_event ack = { 0, };
+	struct prelim_drm_xe_eudebug_ack_event ack = { 0, };
 	char event_str[XE_EUDEBUG_EVENT_STRING_MAX_LEN];
 
 	igt_assert(f);
@@ -2518,5 +2518,5 @@ void xe_eudebug_ack_ufence(int debugfd,
 
 	xe_eudebug_event_to_str((void *)f, event_str, XE_EUDEBUG_EVENT_STRING_MAX_LEN);
 	igt_debug("delivering ack for event: %s\n", event_str);
-	igt_assert_eq(igt_ioctl(debugfd, DRM_XE_EUDEBUG_IOCTL_ACK_EVENT, &ack), 0);
+	igt_assert_eq(igt_ioctl(debugfd, PRELIM_DRM_XE_EUDEBUG_IOCTL_ACK_EVENT, &ack), 0);
 }

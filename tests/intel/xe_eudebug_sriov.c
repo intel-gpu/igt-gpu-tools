@@ -28,7 +28,7 @@ static bool has_vf_enable_eudebug_attr(int fd, unsigned int vf_num)
 	sysfs = igt_sysfs_open(fd);
 	igt_assert_fd(sysfs);
 	/* vf_num is 1-based, but virtfn is 0-based */
-	snprintf(path, sizeof(path), "device/virtfn%u/enable_eudebug", vf_num - 1);
+	snprintf(path, sizeof(path), "device/virtfn%u/prelim_enable_eudebug", vf_num - 1);
 	ret = igt_sysfs_has_attr(sysfs, path);
 	close(sysfs);
 
@@ -62,7 +62,7 @@ static void test_deny_eudebug(int fd)
 			igt_debug("VF%u probe failed\n", vf_num);
 			err = true;
 		} else if (has_vf_enable_eudebug_attr(fd, vf_num)) {
-			igt_debug("VF%u has enable_eudebug attribute\n", vf_num);
+			igt_debug("VF%u has prelim_enable_eudebug attribute\n", vf_num);
 			err = true;
 		}
 	}
@@ -71,7 +71,7 @@ static void test_deny_eudebug(int fd)
 
 	sysfs = igt_sysfs_open(fd);
 	igt_assert_fd(sysfs);
-	igt_assert_eq(igt_sysfs_printf(sysfs, "device/enable_eudebug", "1"), -EPERM);
+	igt_assert_eq(igt_sysfs_printf(sysfs, "device/prelim_enable_eudebug", "1"), -EPERM);
 	close(sysfs);
 }
 

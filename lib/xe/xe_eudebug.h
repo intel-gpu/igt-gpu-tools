@@ -6,7 +6,6 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <xe_drm.h>
-#include <xe_drm_eudebug.h>
 
 #include "igt_core.h"
 #include "igt_list.h"
@@ -84,7 +83,7 @@ struct xe_eudebug_session {
 
 typedef void (*xe_eudebug_client_work_fn)(struct xe_eudebug_client *);
 typedef void (*xe_eudebug_trigger_fn)(struct xe_eudebug_debugger *,
-				      struct drm_xe_eudebug_event *);
+				      struct prelim_drm_xe_eudebug_event *);
 
 #define xe_eudebug_for_each_engine(fd__, hwe__) \
 	xe_for_each_engine(fd__, hwe__) \
@@ -93,8 +92,8 @@ typedef void (*xe_eudebug_trigger_fn)(struct xe_eudebug_debugger *,
 
 #define MAX_EVENT_SIZE (32 * 1024)
 
-static inline struct drm_xe_eudebug_event *
-next_event(struct drm_xe_eudebug_event *e, struct xe_eudebug_event_log *l)
+static inline struct prelim_drm_xe_eudebug_event *
+next_event(struct prelim_drm_xe_eudebug_event *e, struct xe_eudebug_event_log *l)
 {
 	uint8_t *start;
 	uint8_t *end;
@@ -108,7 +107,7 @@ next_event(struct drm_xe_eudebug_event *e, struct xe_eudebug_event_log *l)
 		return NULL;
 
 	if (!e)
-		return (struct drm_xe_eudebug_event *)l->log;
+		return (struct prelim_drm_xe_eudebug_event *)l->log;
 
 	start = (uint8_t *)e;
 
@@ -127,7 +126,7 @@ next_event(struct drm_xe_eudebug_event *e, struct xe_eudebug_event_log *l)
 
 	igt_assert(end < l->log + l->head);
 
-	return (struct drm_xe_eudebug_event *)end;
+	return (struct prelim_drm_xe_eudebug_event *)end;
 }
 
 #define xe_eudebug_for_each_event(_e, _log)	\
@@ -159,25 +158,25 @@ next_event(struct drm_xe_eudebug_event *e, struct xe_eudebug_event_log *l)
  */
 #define XE_EUDEBUG_DEFAULT_TIMEOUT_SEC		60ULL
 
-#define XE_EUDEBUG_FILTER_EVENT_NONE			BIT(DRM_XE_EUDEBUG_EVENT_NONE)
-#define XE_EUDEBUG_FILTER_EVENT_READ			BIT(DRM_XE_EUDEBUG_EVENT_READ)
-#define XE_EUDEBUG_FILTER_EVENT_OPEN			BIT(DRM_XE_EUDEBUG_EVENT_OPEN)
-#define XE_EUDEBUG_FILTER_EVENT_VM			BIT(DRM_XE_EUDEBUG_EVENT_VM)
-#define XE_EUDEBUG_FILTER_EVENT_EXEC_QUEUE		BIT(DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE)
-#define XE_EUDEBUG_FILTER_EVENT_EXEC_QUEUE_PLACEMENTS	BIT(DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS)
-#define XE_EUDEBUG_FILTER_EVENT_EU_ATTENTION		BIT(DRM_XE_EUDEBUG_EVENT_EU_ATTENTION)
-#define XE_EUDEBUG_FILTER_EVENT_VM_BIND			BIT(DRM_XE_EUDEBUG_EVENT_VM_BIND)
-#define XE_EUDEBUG_FILTER_EVENT_VM_BIND_OP		BIT(DRM_XE_EUDEBUG_EVENT_VM_BIND_OP)
-#define XE_EUDEBUG_FILTER_EVENT_VM_BIND_UFENCE		BIT(DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE)
-#define XE_EUDEBUG_FILTER_EVENT_METADATA		BIT(DRM_XE_EUDEBUG_EVENT_METADATA)
-#define XE_EUDEBUG_FILTER_EVENT_VM_BIND_OP_METADATA	BIT(DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA)
-#define XE_EUDEBUG_FILTER_EVENT_PAGEFAULT		BIT(DRM_XE_EUDEBUG_EVENT_PAGEFAULT)
-#define XE_EUDEBUG_FILTER_ALL				GENMASK(DRM_XE_EUDEBUG_EVENT_PAGEFAULT, 0)
+#define XE_EUDEBUG_FILTER_EVENT_NONE			BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_NONE)
+#define XE_EUDEBUG_FILTER_EVENT_READ			BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_READ)
+#define XE_EUDEBUG_FILTER_EVENT_OPEN			BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN)
+#define XE_EUDEBUG_FILTER_EVENT_VM			BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_VM)
+#define XE_EUDEBUG_FILTER_EVENT_EXEC_QUEUE		BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE)
+#define XE_EUDEBUG_FILTER_EVENT_EXEC_QUEUE_PLACEMENTS	BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS)
+#define XE_EUDEBUG_FILTER_EVENT_EU_ATTENTION		BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION)
+#define XE_EUDEBUG_FILTER_EVENT_VM_BIND			BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND)
+#define XE_EUDEBUG_FILTER_EVENT_VM_BIND_OP		BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP)
+#define XE_EUDEBUG_FILTER_EVENT_VM_BIND_UFENCE		BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE)
+#define XE_EUDEBUG_FILTER_EVENT_METADATA		BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA)
+#define XE_EUDEBUG_FILTER_EVENT_VM_BIND_OP_METADATA	BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA)
+#define XE_EUDEBUG_FILTER_EVENT_PAGEFAULT		BIT(PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT)
+#define XE_EUDEBUG_FILTER_ALL				GENMASK(PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT, 0)
 #define XE_EUDEBUG_EVENT_IS_FILTERED(_e, _f)		((1UL << (_e)) & (_f))
 
 int xe_eudebug_connect(int fd, pid_t pid, uint32_t flags);
-const char *xe_eudebug_event_to_str(struct drm_xe_eudebug_event *e, char *buf, size_t len);
-struct drm_xe_eudebug_event *
+const char *xe_eudebug_event_to_str(struct prelim_drm_xe_eudebug_event *e, char *buf, size_t len);
+struct prelim_drm_xe_eudebug_event *
 xe_eudebug_event_log_find_seqno(struct xe_eudebug_event_log *l, uint64_t seqno);
 struct xe_eudebug_event_log *
 xe_eudebug_event_log_create(const char *name, unsigned int max_size);
@@ -185,7 +184,7 @@ void xe_eudebug_event_log_destroy(struct xe_eudebug_event_log *l);
 void xe_eudebug_event_log_print(struct xe_eudebug_event_log *l, bool debug);
 void xe_eudebug_event_log_compare(struct xe_eudebug_event_log *c, struct xe_eudebug_event_log *d,
 				  uint32_t filter);
-void xe_eudebug_event_log_write(struct xe_eudebug_event_log *l, struct drm_xe_eudebug_event *e);
+void xe_eudebug_event_log_write(struct xe_eudebug_event_log *l, struct prelim_drm_xe_eudebug_event *e);
 void xe_eudebug_event_log_match_opposite(struct xe_eudebug_event_log *l, uint32_t filter);
 
 bool xe_eudebug_debugger_available(int fd);
@@ -242,7 +241,7 @@ void xe_eudebug_client_vm_bind_op_metadata_event(struct xe_eudebug_client *c,
 void xe_eudebug_client_vm_bind_ufence_event(struct xe_eudebug_client *c, uint32_t event_flags,
 					    uint64_t ref_seqno);
 void xe_eudebug_ack_ufence(int debugfd,
-			   const struct drm_xe_eudebug_event_vm_bind_ufence *f);
+			   const struct prelim_drm_xe_eudebug_event_vm_bind_ufence *f);
 
 void xe_eudebug_client_vm_bind_flags(struct xe_eudebug_client *c, int fd, uint32_t vm,
 				     uint32_t bo, uint64_t offset,
