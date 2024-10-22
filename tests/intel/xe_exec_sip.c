@@ -98,10 +98,9 @@ static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 				   0 : ILLEGAL_OPCODE_ENABLE;
 		gpgpu_shader__write_on_exception(shader, SHADER_CANARY2, 1, 0,
 						 ILLEGAL_OPCODE_ENABLE, expected_cr0_bit);
-		gpgpu_shader__nop(shader);
-		gpgpu_shader__nop(shader);
-		/* modify second nop, set only opcode bits[6:0] */
-		shader->instr[gpgpu_shader_last_instr(shader)][0] = 0x7f;
+		emit_iga64_code(shader, xe_exec_sip_illegal, R"(
+		illegal
+		)");
 		/* SIP should clear exception bit, negative check */
 		gpgpu_shader__write_on_exception(shader, SHADER_CANARY2, 0, 0,
 						 ILLEGAL_OPCODE_STATUS, ILLEGAL_OPCODE_STATUS);
