@@ -3468,7 +3468,7 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
  *	Schedules EU workload with preinstalled breakpoint on each available engine.
  *	Checks if every context hit breakpoint exception and resume.
  */
-static void test_breakpoint_many_contexts(int fd)
+static void test_breakpoint_many_contexts(int *fd)
 {
 	int n = 0, flags = SHADER_BREAKPOINT | SHADER_MIN_THREADS;
 	struct xe_eudebug_session *s[GEM_MAX_ENGINES] = {};
@@ -3477,7 +3477,11 @@ static void test_breakpoint_many_contexts(int fd)
 	struct drm_xe_engine_class_instance *__e;
 	int i;
 
-	xe_for_each_engine(fd, __e)
+	igt_require(intel_gen_per_context_eudebug(*fd));
+
+	xe_sysfs_enable_ccs_mode(fd);
+
+	xe_for_each_engine(*fd, __e)
 		if (__e->engine_class == DRM_XE_ENGINE_CLASS_RENDER || \
 		    __e->engine_class == DRM_XE_ENGINE_CLASS_COMPUTE)
 			hwe[n++] = __e;
@@ -3485,8 +3489,8 @@ static void test_breakpoint_many_contexts(int fd)
 	igt_require_f(n > 1, "Test requires at least two parallel compute engines!\n");
 
 	for (i = 0; i < n; i++) {
-		data[i] = online_debug_data_create(fd, hwe[i], flags);
-		s[i] = xe_eudebug_session_create(fd, run_online_client, flags, data[i]);
+		data[i] = online_debug_data_create(*fd, hwe[i], flags);
+		s[i] = xe_eudebug_session_create(*fd, run_online_client, flags, data[i]);
 
 		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 						ufence_ack_trigger);
@@ -3530,7 +3534,7 @@ static void test_breakpoint_many_contexts(int fd)
  *	Schedules EU spinner on each available engine. Then it interrupts one of
  *	the contexts and checks if the rest of the contexts are not affected.
  */
-static void test_interrupt_one_of_many_contexts(int fd)
+static void test_interrupt_one_of_many_contexts(int *fd)
 {
 	int n = 0, flags = SHADER_LOOP | SHADER_MIN_THREADS;
 	struct xe_eudebug_session *s[GEM_MAX_ENGINES] = {};
@@ -3539,7 +3543,11 @@ static void test_interrupt_one_of_many_contexts(int fd)
 	struct drm_xe_engine_class_instance *__e;
 	int i, to_interrupt;
 
-	xe_for_each_engine(fd, __e)
+	igt_require(intel_gen_per_context_eudebug(*fd));
+
+	xe_sysfs_enable_ccs_mode(fd);
+
+	xe_for_each_engine(*fd, __e)
 		if (__e->engine_class == DRM_XE_ENGINE_CLASS_RENDER || \
 		    __e->engine_class == DRM_XE_ENGINE_CLASS_COMPUTE)
 			hwe[n++] = __e;
@@ -3547,8 +3555,8 @@ static void test_interrupt_one_of_many_contexts(int fd)
 	igt_require_f(n > 1, "Test requires at least two parallel compute engines!\n");
 
 	for (i = 0; i < n; i++) {
-		data[i] = online_debug_data_create(fd, hwe[i], flags);
-		s[i] = xe_eudebug_session_create(fd, run_online_client, flags, data[i]);
+		data[i] = online_debug_data_create(*fd, hwe[i], flags);
+		s[i] = xe_eudebug_session_create(*fd, run_online_client, flags, data[i]);
 
 		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
 						open_trigger);
@@ -3606,23 +3614,6 @@ static void test_interrupt_one_of_many_contexts(int fd)
 	}
 }
 
-static void ccs_mode_all_engines(int num_gt) {
-       int fd, gt, gt_fd, num_slices, ccs_mode;
-
-       for (gt = 0; gt < num_gt; gt++) {
-               fd = drm_open_driver(DRIVER_XE);
-               gt_fd = xe_sysfs_gt_open(fd, gt);
-               close(fd);
-
-               igt_require(igt_sysfs_scanf(gt_fd, "num_cslices", "%u", &num_slices) > 0);
-
-               igt_assert(igt_sysfs_printf(gt_fd, "ccs_mode", "%u", num_slices) > 0);
-               igt_assert(igt_sysfs_scanf(gt_fd, "ccs_mode", "%u", &ccs_mode) > 0);
-               igt_assert(num_slices == ccs_mode);
-               close(gt_fd);
-       }
-}
-
 static struct drm_xe_engine_class_instance *pick_compute(int fd, int gt)
 {
 	struct drm_xe_engine_class_instance *hwe;
@@ -3667,7 +3658,7 @@ int igt_main()
 {
 	struct drm_xe_engine_class_instance *hwe;
 	bool was_enabled;
-	int fd, num_gt;
+	int fd;
 	uint16_t engine_class = 0xFFFF;
 	uint32_t preempt_timeout = 0xFFFFFFFF;
 	int gen;
@@ -3799,20 +3790,11 @@ int igt_main()
 		test_gt_render_or_compute("interrupt-all-exception-disabled", fd, hwe)
 			test_interrupt_all(fd, hwe, SHADER_LOOP | DISABLE_EXCEPTIONS);
 
-		igt_fixture() {
-			num_gt = xe_number_gt(fd);
-
-			close(fd);
-			ccs_mode_all_engines(num_gt);
-
-			fd = drm_open_driver(DRIVER_XE);
-		}
-
 		igt_subtest("breakpoint-many-contexts")
-			test_breakpoint_many_contexts(fd);
+			test_breakpoint_many_contexts(&fd);
 
 		igt_subtest("interrupt-one-of-many-contexts")
-			test_interrupt_one_of_many_contexts(fd);
+			test_interrupt_one_of_many_contexts(&fd);
 	}
 
 	test_gt_render_or_compute("pagefault-read", fd, hwe) {
