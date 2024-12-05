@@ -360,3 +360,35 @@ void xe_fast_copy(int fd,
 	put_ahnd(ahnd);
 	intel_ctx_destroy(fd, ctx);
 }
+
+/**
+ * xe_sysfs_enable_ccs_mode:
+ * @fd: pointer to xe drm fd, can be reopened multiple times
+ *
+ * Enables ccs_mode on all GTs, it must succeed for at least one GT.
+ * Since function requires the driver to be closed during ccs_mode change
+ * @fd will be closed then re-opened.
+ */
+void xe_sysfs_enable_ccs_mode(int *fd)
+{
+	int gt, gt_fd, num_slices, ccs_mode, num_gt;
+	int enabled_count = 0;
+
+	num_gt = xe_number_gt(*fd);
+
+	for (gt = 0; gt < num_gt; gt++) {
+		gt_fd = xe_sysfs_gt_open(*fd, gt);
+		drm_close_driver(*fd);
+
+		if (!igt_debug_on(igt_sysfs_scanf(gt_fd, "num_cslices", "%u", &num_slices) <= 0) &&
+		    !igt_debug_on(igt_sysfs_printf(gt_fd, "ccs_mode", "%u", num_slices) <= 0) &&
+		    !igt_debug_on(igt_sysfs_scanf(gt_fd, "ccs_mode", "%u", &ccs_mode) <= 0) &&
+		    !igt_debug_on(num_slices != ccs_mode))
+			enabled_count++;
+		close(gt_fd);
+		*fd = drm_open_driver(DRIVER_XE);
+	}
+
+	if (!enabled_count)
+		igt_require_f(0, "Cannot enable ccs mode for any GT\n");
+}
