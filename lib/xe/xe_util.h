@@ -58,5 +58,6 @@ void xe_fast_copy(int fd,
 static inline uint64_t xe_canonical_va(int fd, uint64_t offset) {
 	return sign_extend64(offset, xe_va_bits(fd) - 1);
 }
+void xe_sysfs_enable_ccs_mode(int *fd);
 
 #endif /* XE_UTIL_H */
