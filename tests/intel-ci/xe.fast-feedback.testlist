@@ -258,12 +258,6 @@ igt@xe_waitfence@reltime
 # driver in a broken state that is not otherwise noticed in that test.
 igt@core_hotunplug@unbind-rebind
 
-# Run KUnit tests at the end
-igt@xe_live_ktest@xe_bo@xe_ccs_migrate_kunit
-igt@xe_live_ktest@xe_bo@xe_bo_evict_kunit
-igt@xe_live_ktest@xe_dma_buf
-igt@xe_live_ktest@xe_migrate
-
 # Move fault_mode tests at the end to unblock execution
 igt@xe_exec_fault_mode@twice-basic
 igt@xe_exec_fault_mode@many-basic
@@ -375,3 +369,9 @@ igt@xe_exec_sip_eudebug@breakpoint-writesip
 igt@xe_exec_sip_eudebug@breakpoint-writesip-nodebug
 igt@xe_exec_sip_eudebug@breakpoint-writesip-twice
 igt@xe_exec_sip_eudebug@wait-writesip-nodebug
+
+# Run KUnit tests at the end
+igt@xe_live_ktest@xe_bo@xe_ccs_migrate_kunit
+igt@xe_live_ktest@xe_bo@xe_bo_evict_kunit
+igt@xe_live_ktest@xe_dma_buf
+igt@xe_live_ktest@xe_migrate
