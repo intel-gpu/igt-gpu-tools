@@ -253,12 +253,6 @@ igt@xe_waitfence@abstime
 igt@xe_waitfence@engine
 igt@xe_waitfence@reltime
 
-# Run KUnit tests at the end
-igt@xe_live_ktest@xe_bo@xe_ccs_migrate_kunit
-igt@xe_live_ktest@xe_bo@xe_bo_evict_kunit
-igt@xe_live_ktest@xe_dma_buf
-igt@xe_live_ktest@xe_migrate
-
 # Move fault_mode tests at the end to unblock execution
 igt@xe_exec_fault_mode@twice-basic
 igt@xe_exec_fault_mode@many-basic
@@ -370,6 +364,12 @@ igt@xe_exec_sip_eudebug@breakpoint-writesip
 igt@xe_exec_sip_eudebug@breakpoint-writesip-nodebug
 igt@xe_exec_sip_eudebug@breakpoint-writesip-twice
 igt@xe_exec_sip_eudebug@wait-writesip-nodebug
+
+# Run KUnit tests at the end
+igt@xe_live_ktest@xe_bo@xe_ccs_migrate_kunit
+igt@xe_live_ktest@xe_bo@xe_bo_evict_kunit
+igt@xe_live_ktest@xe_dma_buf
+igt@xe_live_ktest@xe_migrate
 
 # All tests that do module unloading and reloading are executed last.
 # They will sometimes reveal issues of earlier tests leaving the
