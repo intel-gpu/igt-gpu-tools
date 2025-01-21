@@ -65,11 +65,25 @@ create_fill_buf(int fd, int width, int height, uint8_t color)
 	return buf;
 }
 
+static bool intel_gen_per_context_eudebug(int fd)
+{
+	const uint32_t id = intel_get_drm_devid(fd);
+
+	return intel_gen(id) >= 35;
+}
+
+#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS BIT(14)
 static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 {
 	static struct gpgpu_shader *shader;
 
 	shader = gpgpu_shader_create(fd);
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		if (shader_type == SHADER_BREAKPOINT)
+			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
+	}
+
 	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 
 	switch (shader_type) {
