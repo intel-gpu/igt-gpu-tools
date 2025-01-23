@@ -618,7 +618,7 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 
 	if (intel_gen_per_context_eudebug(data->drm_fd)) {
 		if (data->flags & (SHADER_BREAKPOINT | TRIGGER_RESUME_SET_BP | SHADER_SINGLE_STEP |
-				    SHADER_N_NOOP_BREAKPOINT))
+				   SHADER_N_NOOP_BREAKPOINT | TRIGGER_UFENCE_SET_BREAKPOINT))
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
 		if (data->flags & SHADER_LOOP)
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
@@ -2350,6 +2350,11 @@ static void test_set_breakpoint_online(int fd, struct drm_xe_engine_class_instan
 					ufence_ack_set_bp_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
+	/* Per context debug */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_resume_trigger);
 
 	xe_eudebug_session_run(s);
 	online_session_check(s);
@@ -2582,6 +2587,11 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
 					eu_attention_resume_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
+	/* Per context debug */
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_resume_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
 	xe_eudebug_debugger_start_worker(s->debugger);
