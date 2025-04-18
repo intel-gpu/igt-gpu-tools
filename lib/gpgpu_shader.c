@@ -46,8 +46,7 @@ __emit_iga64_code(struct gpgpu_shader *shdr, struct iga64_template const *tpls,
 {
 	uint32_t *ptr;
 
-	igt_require_f(shdr->gfx_ver >= SUPPORTED_GFX_VER,
-		      "No available shader templates for platforms older than XeLP\n");
+	igt_assert(SUPPORTED_GFX_VER <= shdr->gfx_ver);
 
 	while (shdr->gfx_ver < tpls->gfx_ver)
 		tpls++;
