@@ -24,7 +24,7 @@
 #include "xe/xe_ioctl.h"
 #include "xe/xe_query.h"
 
-#define WIDTH 64
+#define WIDTH 128
 #define HEIGHT 64
 
 #define COLOR_C4 0xc4c4c4c4
@@ -89,21 +89,22 @@ static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 	else if (shader_type == SHADER_OOB_EXCEPTION_MODE_ENABLED)
 		shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_OOB;
 
-	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
-
 	switch (shader_type) {
 	case SHADER_HANG:
+		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 		gpgpu_shader__label(shader, 0);
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__jump(shader, 0);
 		break;
 	case SHADER_WRITE:
+		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 		break;
 	case SHADER_INV_INSTR_THREAD_ENABLED:
 		gpgpu_shader__set_exception(shader, ILLEGAL_OPCODE_ENABLE);
 		__attribute__ ((fallthrough));
 	case SHADER_INV_INSTR_DISABLED:
 	case SHADER_INV_INSTR_WALKER_ENABLED:
+		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 		expected_cr0_bit = shader_type == SHADER_INV_INSTR_DISABLED ?
 				   0 : ILLEGAL_OPCODE_ENABLE;
 		gpgpu_shader__write_on_exception(shader, SHADER_CANARY2, 1, 0,
@@ -140,10 +141,10 @@ static struct gpgpu_shader *get_sip(int fd, enum sip_type sip_type, unsigned int
 		return NULL;
 
 	sip = gpgpu_shader_create(fd);
-	gpgpu_shader__write_dword(sip, SIP_CANARY, y_offset);
 
 	switch (sip_type) {
 	case SIP_INV_INSTR:
+		gpgpu_shader__write_dword(sip, SIP_CANARY, y_offset);
 		gpgpu_shader__write_on_exception(sip, SIP_CANARY2, 0, y_offset,
 						 ILLEGAL_OPCODE_STATUS, 0);
 		/* skip invalid instruction */
@@ -154,6 +155,7 @@ static struct gpgpu_shader *get_sip(int fd, enum sip_type sip_type, unsigned int
 		gpgpu_shader__write_on_exception(sip, 1, 0, y_offset, OOB_STATUS, 0);
 		break;
 	default:
+		gpgpu_shader__write_dword(sip, SIP_CANARY, y_offset);
 		break;
 	}
 
@@ -189,42 +191,37 @@ static void check_fill_buf(uint32_t *ptr, const int dword_width, const int x, co
 		     color, val, x, y);
 }
 
-static void check_buf(int fd, uint32_t handle, int width, int height, int thread_count_expected,
-		      enum shader_type shader_type, enum sip_type sip_type, uint32_t poison_c)
+static void check_buf_default(uint32_t *buf, int width, int height, int threads,
+			      enum shader_type shader_type, enum sip_type sip_type)
 {
 	int thread_count = 0, sip_count = 0, invalidinstr_count = 0;
-	unsigned int sz = ALIGN(width * height, 4096);
-	const uint32_t dword_width = width / 4;
-	uint32_t *ptr;
 	int i, j;
 
-	ptr = xe_bo_mmap_ext(fd, handle, sz, PROT_READ);
-
 	for (i = 1, j = 0; j < height / 2; ++j) {
-		if (ptr[j * dword_width] == SHADER_CANARY)
+		if (buf[j * width] == SHADER_CANARY)
 			++thread_count;
 		else
-			check_fill_buf(ptr, dword_width, 0, j, poison_c);
+			check_fill_buf(buf, width, 0, j, COLOR_C4);
 
-		if (ptr[j * dword_width + 1] == SHADER_CANARY2) {
+		if (buf[j * width + 1] == SHADER_CANARY2) {
 			++invalidinstr_count;
 			++i;
 		}
 
-		for (; i < dword_width; i++)
-			check_fill_buf(ptr, dword_width, i, j, poison_c);
+		for (; i < width; i++)
+			check_fill_buf(buf, width, i, j, COLOR_C4);
 
 		i = 1;
 	}
 
 	for (i = 0, j = height / 2; j < height; ++j) {
-		if (ptr[j * dword_width] == SIP_CANARY) {
+		if (buf[j * width] == SIP_CANARY) {
 			++sip_count;
 			i = 4;
 		}
 
-		for (; i < dword_width; i++)
-			check_fill_buf(ptr, dword_width, i, j, poison_c);
+		for (; i < width; i++)
+			check_fill_buf(buf, width, i, j, COLOR_C4);
 
 		i = 0;
 	}
@@ -246,6 +243,18 @@ static void check_buf(int fd, uint32_t handle, int width, int height, int thread
 			     thread_count, sip_count);
 	else
 		igt_assert_eq(sip_count, 0);
+}
+
+static void check_buf(int fd, uint32_t handle, int width, int height, int threads,
+		      enum shader_type shader_type, enum sip_type sip_type)
+{
+	const unsigned int sz = ALIGN(width * height, 4096);
+	uint32_t *ptr;
+	const int dword_width = width / sizeof(*ptr);
+
+	ptr = xe_bo_mmap_ext(fd, handle, sz, PROT_READ);
+
+	check_buf_default(ptr, dword_width, height, threads, shader_type, sip_type);
 
 	munmap(ptr, sz);
 }
@@ -330,7 +339,7 @@ static void test_sip(enum shader_type shader_type, enum sip_type sip_type,
 	intel_bb_sync(ibb);
 	igt_assert_lt_u64(igt_nsec_elapsed(&ts), timeout);
 
-	check_buf(fd, handle, width, height, threads, shader_type, sip_type, COLOR_C4);
+	check_buf(fd, handle, width, height, threads, shader_type, sip_type);
 
 	gem_close(fd, handle);
 	intel_bb_destroy(ibb);
