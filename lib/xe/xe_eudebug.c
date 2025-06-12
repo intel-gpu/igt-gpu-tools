@@ -135,6 +135,8 @@ static const char *type_to_str(unsigned int type)
 		return "vm";
 	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE:
 		return "exec_queue";
+	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS:
+		return "exec_queue_placements";
 	case DRM_XE_EUDEBUG_EVENT_EU_ATTENTION:
 		return "attention";
 	case DRM_XE_EUDEBUG_EVENT_VM_BIND:
@@ -151,8 +153,6 @@ static const char *type_to_str(unsigned int type)
 		return "pagefault";
 	case DRM_XE_EUDEBUG_EVENT_SYNC_HOST:
 		return "sync_host";
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS:
-		return "exec_queue_placements";
 	}
 
 	return "UNKNOWN";
@@ -184,18 +184,6 @@ static const char *flags_to_str(unsigned int flags)
 	return "flags unknown";
 }
 
-static const char *eu_engine_class_to_str(uint16_t engine_class)
-{
-	switch (engine_class) {
-	case DRM_XE_ENGINE_CLASS_COMPUTE:
-		return "ccs";
-	case DRM_XE_ENGINE_CLASS_RENDER:
-		return "rcs";
-	default:
-		return "unsupported class";
-	}
-}
-
 static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *buf)
 {
 	switch (e->type) {
@@ -219,6 +207,27 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
 			"exec_queue_handle=%llu, engine_class=%d, exec_queue_width=%d",
 			ee->client_handle, ee->vm_handle,
 			ee->exec_queue_handle, ee->engine_class, ee->width);
+		break;
+	}
+	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
+		struct drm_xe_eudebug_event_exec_queue_placements *ee = igt_container_of(e, ee,
+											 base);
+		struct drm_xe_engine_class_instance *instances = (void *)(ee->instances);
+		int i, l;
+
+		l = sprintf(buf, "client_handle=%llu, vm_handle=%llu, "
+			    "exec_queue_handle=%llu, lrc_handle=%llu, "
+			    "num_placements=%d, gt_id=%d, mask=[",
+			    ee->client_handle, ee->vm_handle,
+			    ee->exec_queue_handle, ee->lrc_handle,
+			    ee->num_placements, instances[0].gt_id);
+
+		for (i = 0; i < ee->num_placements; i++)
+			l += sprintf(buf + l, "%s%d pad%d, ",
+				     xe_engine_class_short_string(instances[i].engine_class),
+				     instances[i].engine_instance, instances[i].pad);
+		buf[l - 2] = ']';
+
 		break;
 	}
 	case DRM_XE_EUDEBUG_EVENT_EU_ATTENTION: {
@@ -278,26 +287,6 @@ static const char *event_members_to_str(struct drm_xe_eudebug_event *e, char *bu
 
 		sprintf(buf, "client_handle=%llu, exec_queue_handle=%llu, lrc_handle=%llu",
 			es->client_handle, es->exec_queue_handle, es->lrc_handle);
-		break;
-	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
-		struct drm_xe_eudebug_event_exec_queue_placements *ee = (void *)e;
-		struct drm_xe_engine_class_instance *instances = (void *)(ee->instances);
-		int i, l;
-
-		l = sprintf(buf, "client_handle=%llu, vm_handle=%llu, "
-			    "exec_queue_handle=%llu, lrc_handle=%llu, "
-			    "num_placements=%d, gt_id=%d, mask=[",
-			    ee->client_handle, ee->vm_handle,
-			    ee->exec_queue_handle, ee->lrc_handle,
-			    ee->num_placements, instances[0].gt_id);
-
-		for (i = 0; i < ee->num_placements; i++)
-			l += sprintf(buf + l, "%s%d pad%d, ",
-				     eu_engine_class_to_str(instances[i].engine_class),
-				     instances[i].engine_instance, instances[i].pad);
-		buf[l - 2] = ']';
-
 		break;
 	}
 	default:
@@ -574,6 +563,19 @@ static int match_fields(struct drm_xe_eudebug_event *a, void *data)
 			ret = 1;
 		break;
 	}
+	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
+		struct drm_xe_eudebug_event_exec_queue_placements *ae = igt_container_of(a, ae,
+											 base);
+		struct drm_xe_eudebug_event_exec_queue_placements *be = igt_container_of(b, be,
+											 base);
+
+		if (ae->num_placements == be->num_placements &&
+		    memcmp(ae->instances, be->instances,
+			   sizeof(uint64_t) * ae->num_placements) == 0)
+			ret = 1;
+
+		break;
+	}
 	case DRM_XE_EUDEBUG_EVENT_VM_BIND: {
 		struct drm_xe_eudebug_event_vm_bind *ea = igt_container_of(a, ea, base);
 		struct drm_xe_eudebug_event_vm_bind *eb = igt_container_of(b, eb, base);
@@ -601,17 +603,6 @@ static int match_fields(struct drm_xe_eudebug_event *a, void *data)
 		break;
 	}
 
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
-		struct drm_xe_eudebug_event_exec_queue_placements *ae = (void *)a;
-		struct drm_xe_eudebug_event_exec_queue_placements *be = (void *)b;
-
-		if (ae->num_placements == be->num_placements &&
-		    memcmp(ae->instances, be->instances,
-			   sizeof(*be->instances) * ae->num_placements) == 0)
-			ret = 1;
-
-		break;
-	}
 	default:
 		ret = 1;
 		break;
@@ -647,6 +638,14 @@ static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
 	}
 	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE: {
 	struct drm_xe_eudebug_event_exec_queue *ee = igt_container_of(e, ee, base);
+
+		if (ee->client_handle == h)
+			return 1;
+		break;
+	}
+	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
+		struct drm_xe_eudebug_event_exec_queue_placements *ee = igt_container_of(e, ee,
+											 base);
 
 		if (ee->client_handle == h)
 			return 1;
@@ -689,13 +688,6 @@ static int match_client_handle(struct drm_xe_eudebug_event *e, void *data)
 		struct drm_xe_eudebug_event_vm_bind_op_metadata *eo = igt_container_of(e, eo, base);
 
 		if (eo->vm_bind_op_ref_seqno == *bind_op_seqno)
-			return 1;
-		break;
-	}
-	case DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS: {
-		struct drm_xe_eudebug_event_exec_queue_placements *ee = (void *)e;
-
-		if (ee->client_handle == h)
 			return 1;
 		break;
 	}
@@ -1166,11 +1158,11 @@ xe_eudebug_event_log_match_opposite(struct xe_eudebug_event_log *l, uint32_t fil
 			if (XE_EUDEBUG_EVENT_IS_FILTERED(ev1->type, filter))
 				continue;
 
-			/* No opposite matching for binds */
+			/* No opposite matching for some events */
 			if ((ev1->type >= DRM_XE_EUDEBUG_EVENT_VM_BIND &&
 			     ev1->type <= DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE) ||
-			     ev1->type == DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA ||
-			     ev1->type == DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS)
+			    ev1->type == DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA ||
+			    ev1->type == DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS)
 				continue;
 
 			ev2 = opposite_event_match(l, ev1, ev1);
