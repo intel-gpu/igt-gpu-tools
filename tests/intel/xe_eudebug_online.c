@@ -849,6 +849,26 @@ static int __eu_ctl(int debugfd, uint64_t client,
 	return 0;
 }
 
+static int __eu_ctl_from_event(int debugfd, struct drm_xe_eudebug_event *e, uint32_t cmd,
+			       uint64_t *seqno)
+{
+	switch (e->type) {
+	case DRM_XE_EUDEBUG_EVENT_EU_ATTENTION: {
+		struct drm_xe_eudebug_event_eu_attention *at = igt_container_of(e, at, base);
+
+		return __eu_ctl(debugfd, at->client_handle, at->exec_queue_handle, at->lrc_handle,
+				at->bitmask, &at->bitmask_size, cmd, seqno);
+	}
+	case DRM_XE_EUDEBUG_EVENT_SYNC_HOST: {
+		struct drm_xe_eudebug_event_sync_host *es = igt_container_of(e, es, base);
+
+		return __eu_ctl(debugfd, es->client_handle, es->exec_queue_handle, es->lrc_handle,
+				NULL, 0, cmd, seqno);
+	}
+	}
+	igt_assert_f(0, "%s: unsupported event type: %d\n", __func__, e->type);
+}
+
 static uint64_t eu_ctl(int debugfd, uint64_t client,
 		       uint64_t exec_queue, uint64_t lrc,
 		       uint8_t *bitmask, uint32_t *bitmask_size, uint32_t cmd)
@@ -1606,10 +1626,9 @@ static void overwrite_immediate_value_in_common_target_write(int vm_fd, uint64_t
 	}
 }
 
-static void eu_attention_resume_caching_trigger(struct xe_eudebug_debugger *d,
-						struct drm_xe_eudebug_event *e)
+static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
+					     struct drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_eu_attention *att = (void *)e;
 	struct online_debug_data *data = d->ptr;
 	struct dim_t s_dim = surface_dimensions(data->thread_count);
 	uint32_t *kernel_offset = &data->kernel_offset;
@@ -1623,6 +1642,9 @@ static void eu_attention_resume_caching_trigger(struct xe_eudebug_debugger *d,
 			caching_get_instruction_count(d->master_fd, s_dim.x, data->flags);
 	uint64_t seqno = 0;
 	int ret;
+
+	if (data->last_eu_control_seqno > e->seqno)
+		return;
 
 	shader_preamble = gpgpu_shader_create(d->master_fd);
 	gpgpu_shader__write_dword(shader_preamble, SHADER_CANARY, 0);
@@ -1677,9 +1699,8 @@ static void eu_attention_resume_caching_trigger(struct xe_eudebug_debugger *d,
 			igt_assert_f(vm_read_target_u32(data, i) != CACHING_POISON_VALUE,
 				     "Poison value found at %04d!\n", i);
 
-	ret = __eu_ctl(d->fd, att->client_handle, att->exec_queue_handle, att->lrc_handle,
-		       att->bitmask, &att->bitmask_size, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME,
-		       &seqno);
+	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, &seqno);
+	data->last_eu_control_seqno = seqno;
 
 	/*
 	 * XXX: build a better sync between workload lifetime vs resume.
@@ -3340,15 +3361,23 @@ static void test_caching(int fd, struct drm_xe_engine_class_instance *hwe, uint6
 
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
-					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
-					eu_attention_resume_caching_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_resume_caching_trigger);
+	} else {
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+						eu_attention_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+						sync_host_resume_caching_trigger);
+	}
 
 	xe_eudebug_session_run(s);
 	online_session_check(s);
