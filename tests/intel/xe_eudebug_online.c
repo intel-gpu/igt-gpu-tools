@@ -618,7 +618,8 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 
 	if (intel_gen_per_context_eudebug(data->drm_fd)) {
 		if (data->flags & (SHADER_BREAKPOINT | TRIGGER_RESUME_SET_BP | SHADER_SINGLE_STEP |
-				   SHADER_N_NOOP_BREAKPOINT | TRIGGER_UFENCE_SET_BREAKPOINT))
+		    SHADER_N_NOOP_BREAKPOINT | TRIGGER_UFENCE_SET_BREAKPOINT | SHADER_CACHING_SRAM |
+		    SHADER_CACHING_VRAM))
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
 		if (data->flags & SHADER_LOOP)
 			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
