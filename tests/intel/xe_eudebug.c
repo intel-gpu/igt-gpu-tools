@@ -826,6 +826,11 @@ static void test_read_event(int fd)
 	igt_assert_eq(event->type, DRM_XE_EUDEBUG_EVENT_OPEN);
 	igt_assert_eq(event->flags, DRM_XE_EUDEBUG_EVENT_CREATE);
 
+	/*
+	 * Only Open & Close events are in this test.
+	 * Wait for client to exit so that close event is generated.
+	 */
+	xe_eudebug_client_wait_done(c);
 	igt_assert_eq(poll_event(d->fd, 500), 1);
 
 	event->flags = 0;
@@ -873,7 +878,6 @@ static void test_read_event(int fd)
 	event->type = DRM_XE_EUDEBUG_EVENT_READ;
 	igt_assert_eq(__read_event(d->fd, event), -EAGAIN);
 
-	xe_eudebug_client_wait_done(c);
 	xe_eudebug_client_stop(c);
 
 	/* Negative read event - no client process in non blocking mode */
