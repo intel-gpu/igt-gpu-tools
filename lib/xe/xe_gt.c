@@ -45,14 +45,15 @@ bool has_xe_gt_reset(int fd)
 
 static void xe_force_gt_reset(int fd, int gt, bool sync)
 {
-	const char *attr = sync ? "force_reset_sync" : "force_reset";
-	int dir = igt_debugfs_gt_dir(fd, gt);
-	int len;
+	char reset_string[128];
+	struct stat st;
 
-	igt_assert_neq(dir, -1);
-	len = igt_sysfs_write(dir, attr, "1", 1);
-	close(dir);
-	igt_assert_eq(len, 1);
+	igt_assert_eq(fstat(fd, &st), 0);
+
+	snprintf(reset_string, sizeof(reset_string),
+		 "cat /sys/kernel/debug/dri/%d/gt%d/force_reset%s",
+		 minor(st.st_rdev), gt, sync ? "_sync" : "");
+	system(reset_string);
 }
 
 /**
