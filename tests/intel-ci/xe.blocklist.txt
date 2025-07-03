@@ -125,6 +125,16 @@ igt@kms_chamelium_edid@hdmi-edid-stress-resolution-4k
 ##################################################################
 igt@xe_exec_compute_mode@non-blocking
 ##################################################################
+# Tests are expected to be skipped because the required kernel
+# changes are not present
+##################################################################
+igt@xe_exec_system_allocator@.*
+igt@xe_pmu@.*fn-engine-activity.*
+igt@xe_mmap@pci-membarrier.*
+# fault-injection tests
+igt@xe_fault_injection@*
+##################################################################
+##################################################################
 # Async flips with linear modifier are slower
 ##################################################################
 igt@kms_async_flips@async-flip-with-page-flip-events-linear.*
