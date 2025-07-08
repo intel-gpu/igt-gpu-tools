@@ -2770,7 +2770,7 @@ static void test_reset_with_attention_online(int fd, struct drm_xe_engine_class_
 					ufence_ack_trigger);
 	/* Per context debug */
 	xe_eudebug_debugger_add_trigger(s2->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
-					sync_host_reset_trigger);
+					sync_host_resume_trigger);
 
 	xe_eudebug_session_run(s2);
 
