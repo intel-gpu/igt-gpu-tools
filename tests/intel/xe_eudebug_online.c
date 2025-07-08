@@ -1213,11 +1213,11 @@ static void sync_host_reset_trigger(struct xe_eudebug_debugger *d,
 	struct drm_xe_eudebug_event_sync_host *s = (void *) e;
 	struct online_debug_data *data = d->ptr;
 
-	igt_debug("EVENT[%llu] sync-host with reset; client[%llu], exec_queue[%llu], "
+	igt_debug("EVENT[%llu] sync-host with sync reset; client[%llu], exec_queue[%llu], "
 		  "lrc[%llu]\n", s->base.seqno,
 		  s->client_handle, s->exec_queue_handle, s->lrc_handle);
 
-	xe_force_gt_reset_async(d->master_fd, data->hwe.gt_id);
+	xe_force_gt_reset_sync(d->master_fd, data->hwe.gt_id);
 }
 
 static void only_nth_set_bit(uint8_t *dst, uint8_t *src, int size, int n)
