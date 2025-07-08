@@ -2249,14 +2249,14 @@ static void eu_attention_debugger_detach_trigger(struct xe_eudebug_debugger *d,
 	 */
 	reset_debugger_log(d);
 
-	ret = xe_eudebug_debugger_reattach(d, c_pid);
-	igt_assert_eq(ret, 0);
-
 	/* Discovery worker will replay events that have occurred, which leads to
 	 * a vm event being sent and vm_open_trigger being re-run, which would lead
 	 * to us trying to open a removed vm. Thus, remove this trigger from list.
 	 */
 	xe_eudebug_debugger_remove_trigger(d, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+
+	ret = xe_eudebug_debugger_reattach(d, c_pid);
+	igt_assert_eq(ret, 0);
 
 	/* Let the discovery worker discover resources */
 	sleep(2);
