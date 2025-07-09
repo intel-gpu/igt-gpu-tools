@@ -11,6 +11,8 @@
  * Functionality: eu kernel debug
  * Test category: functionality test
  */
+#include <poll.h>
+#include <sys/ioctl.h>
 
 #include "xe/xe_eudebug.h"
 #include "xe/xe_gt.h"
@@ -95,6 +97,50 @@ struct dim_t {
 	uint32_t x;
 	uint32_t y;
 	uint32_t alignment;
+};
+
+struct online_debug_data {
+	pthread_mutex_t mutex;
+	/* client in */
+	int drm_fd;
+	struct drm_xe_engine_class_instance hwe;
+	uint64_t flags;
+	int thread_count;
+	uint32_t gfx_ver;
+	/* client out */
+	int thread_hit_count;
+	/* debugger internals */
+	uint64_t client_handle;
+	uint64_t exec_queue_handle;
+	uint64_t lrc_handle;
+	uint64_t target_offset;
+	size_t target_size;
+	uint64_t bb_offset;
+	size_t bb_size;
+	int vm_fd;
+	uint32_t kernel_offset;
+	uint32_t first_aip;
+	uint64_t *aips_offset_table;
+	uint32_t steps_done;
+	uint8_t *single_step_bitmask;
+	int stepped_threads_count;
+	struct timespec exception_arrived;
+	int last_eu_control_seqno;
+	struct drm_xe_eudebug_event *exception_event;
+	int att_event_counter;
+	uint32_t pf_thread_number;
+	int num_threads_per_eu;
+	int max_subslices_per_slice;
+	struct dim_t w_dim;
+	int thread_resumed;
+	struct single_step {
+		struct sip_arf_sso *arfs;
+		uint32_t current_thread;
+		uint32_t current_step;
+		uint32_t threads_checked;
+		uint64_t *thread_last_aip;
+	} sso;
+	bool acked;
 };
 
 struct sip_arf_dump {
@@ -229,6 +275,58 @@ struct sip_arf_dump {
 
 };
 
+/*
+ * Breakpoint exception status bit for
+ * Xe3: cr0.1 (bspec 56624)
+ */
+#define SSO_CTRL_BREAKPOINT_STATUS	BIT(31)
+/*
+ * Remaining exception statuses
+ * Xe3: cr0.1 (bspec 56624)
+ */
+#define SSO_CTRL_EXCEPTION_STATUSES	0x7f800000
+
+#define SSO_THREAD_STEP		0x3 /* resume with single-step on */
+#define SSO_THREAD_RESUME	0x1 /* resume without single-step on */
+
+/*
+ * Single-step-one dedicated ARF structure
+ * Fields populated by SIP for each stopped thread.
+ */
+struct sip_arf_sso {
+	/* DW0: value 0xdead means thread is halted.*/
+	uint32_t thread_halted;
+	/*
+	 * DW1: control register with exception statuses
+	 * Xe3 bspec: 56624, cr0.1
+	 * bit 31 - breakpoint status
+	 * bits 23-31 exception statuses
+	 */
+	uint32_t exctrl;
+	/* DW2 & 3:
+	 * aip (l - low, h - high)
+	 * For Xe3 bspec 56624
+	 *   aipl - cr0.2
+	 *   aiph - cr0.3
+	 */
+	uint32_t aipl;
+	uint32_t aiph;
+
+	/* DW4-6: reserved */
+	uint32_t rsvd0;
+	uint32_t rsvd1;
+	uint32_t rsvd2;
+
+	/*
+	 * DW7:
+	 * Before thread resume ioctl write to this field:
+	 * - SSO_THREAD_STEP to continue single stepping
+	 * - other non zero value to resume
+	 * - 0 value will make tread jump back to sync.host.
+	 */
+	uint32_t resume;
+};
+
 static void print_sip_arf_dump(struct sip_arf_dump *arf_dump, int x, int y)
 {
 	igt_debug("=========================================================\n");
@@ -337,43 +435,6 @@ static struct intel_buf *create_uc_buf_for_e64(int fd, int width, int height, in
 
 	return buf;
 }
-
-struct online_debug_data {
-	pthread_mutex_t mutex;
-	/* client in */
-	int drm_fd;
-	struct drm_xe_engine_class_instance hwe;
-	uint64_t flags;
-	int thread_count;
-	uint32_t gfx_ver;
-	/* client out */
-	int thread_hit_count;
-	/* debugger internals */
-	uint64_t client_handle;
-	uint64_t exec_queue_handle;
-	uint64_t lrc_handle;
-	uint64_t target_offset;
-	size_t target_size;
-	uint64_t bb_offset;
-	size_t bb_size;
-	int vm_fd;
-	uint32_t kernel_offset;
-	uint32_t first_aip;
-	uint64_t *aips_offset_table;
-	uint32_t steps_done;
-	uint8_t *single_step_bitmask;
-	int stepped_threads_count;
-	struct timespec exception_arrived;
-	int last_eu_control_seqno;
-	struct drm_xe_eudebug_event *exception_event;
-	int att_event_counter;
-	uint32_t pf_thread_number;
-	int num_threads_per_eu;
-	int max_subslices_per_slice;
-	struct dim_t w_dim;
-	int thread_resumed;
-	bool acked;
-};
 
 static void vm_read(int fd, void *ptr, size_t count, off_t offset)
 {
@@ -594,10 +655,107 @@ WAIT_HOST:
 	)");
 }
 
-#define STATE_COMPUTE_MODE_ENABLE_FE_FEH		BIT(15)
-#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS		BIT(14)
-#define STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION	BIT(13)
-#define STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION	BIT(9)
+static void emit_e64b_single_step_one_sip(struct gpgpu_shader *shdr)
+{
+	igt_assert(shdr->gfx_ver >= 3500);
+
+	emit_iga64_code(shdr, e64b_sso_arf, R"(
+#if GFX_VER >= 3500
+// Set base address with scalar register
+(W)		mov (1)		s0.0<1>:uq		R1_TGT_ADDRESS
+
+// initialize register for store
+(W)		mov (8)		r10.0<1>:uq		0x0:uq
+// initialize register for load
+(W)		mov (8)		r11.0<1>:uq		0x0:uq
+
+// Prepare Data store
+(W)		mov (1)		r10.0<1>:ud		0xdead:ud // set halted flag
+(W)		mov (1)		r10.1<1>:ud		cr0.1<0;1,0>:ud
+(W)		mov (1)		r10.2<1>:ud		cr0.2<0;1,0>:ud
+(W)		mov (1)		r10.3<1>:ud		cr0.3<0;1,0>:ud
+(W)		mov (1)		r10.4<1>:ud		0x0:ud
+(W)		mov (1)		r10.5<1>:ud		0x0:ud
+(W)		mov (1)		r10.6<1>:ud		0x0:ud
+(W)		mov (1)		r10.7<1>:ud		0x0:ud // resume
+
+// A64 offset initialize
+(W)		mov (8)		r20.0<1>:uq		0x0:uq
+
+// Calculate the address using Thread Group ID X, Thread Group ID Y,
+// and the size of the data block is 0x20
+// Configure Structure_INTERFACE_DESCRIPTOR_DATA_2 to have only 1 thread per thread group
+// Calculate Address offset
+// ((tgid y * x_dim ) + tgid x ) * data_size_to_save (0x20)
+// Structure_GPGPU_R0Payload (bspec: 56587) holds Thread Group ID X and Thread Group ID Y
+// Thread Group ID Y =>  r0.6<0;1,0>:ud
+// Thread Group DIM_X => DIM_X from inline data
+(W)		mul (1)		r20.0<1>:ud		R0_TGIDY R1_DIM_X
+// Thread Group ID X =>  r0.1<0;1,0>:ud
+(W)		add (1)		r20.0<1>:ud		r20.0<0;1,0>:ud	R0_TGIDX
+// Data block size: 8 x D32 => 32 bytes => 0x20
+(W)		mul (1)		r20.0<1>:ud		r20.0<0;1,0>:ud	0x20:ud
+
+// efficient 64bit Store with Uncached L1, Uncached L3
+// sendg ugm store with SBID 5
+// Message Descriptor
+//      bspec:71885
+//      0x29604 =>
+//      [45:44] Offset Scaling: 0(disable)
+//      [43:22] Global Offset: 0
+//      [21] Overfetch: 0 (disable)
+//      [19:16] Cache: 2 (L1 uncached, L3 uncached)
+//      [15:14] Address Type and Size: 2 (Flat A64 Base, A64 Index)
+//      [13:11] Data Size: 2 (D32)
+//      [10:10] Transpose : 1 (enable)
+//      [9:7] Vector Size: 4 (Vector length 8)
+//      [5:0] Opcode: 4 (Store)
+(W)		sendg.ugm (1|M0)	null	r20:1	r10:1	s0.0	0x29604
+
+WAIT_HOST:
+(W)		sync.host		null
+
+// Load memory and if resume is not 1, jump to sync.host line with jmpi to execute again
+// efficient 64bit Load with Uncached L1, Uncached L3
+// sendg ugm load with SBID 7
+// Message Descriptor
+//      bspec:71885
+//      0x29600 =>
+//      [45:44] Offset Scaling: 0(disable)
+//      [43:22] Global Offset: 0
+//      [21] Overfetch: 0 (disable)
+//      [19:16] Cache: 2 (L1 uncached, L3 uncached)
+//      [15:14] Address Type and Size: 2 (Flat A64 Base, A64 Index)
+//      [13:11] Data Size: 2 (D32)
+//      [10:10] Transpose : 1 (enable)
+//      [9:7] Vector Size: 4 (Vector length 8)
+//      [5:0] Opcode: 0 (Load)
+(W)		sendg.ugm (1|M0)	r11	r20:1	null:0	s0.0	0x29600
+
+// If the r11.7<1>:ud does have value 0, then the sip should wait again with sync.host
+(W)		mov (1|M0)	f0.0<1>:ud	0x0:ud
+(W)		cmp (1|M0)	(eq)f0.0	null<1>:ud	 r11.7<0;1,0>:ud	0x0:ud
+(W&f0.0)	jmpi		WAIT_HOST
+
+// Set Breakpoint Suppress
+(W)	or  (1|M0)                      cr0.0<1>:ud   cr0.0<0;1,0>:ud   0x8000:ud
+// Clear all the exceptions in cr0.1 including Breakpoint
+(W)		and (1|M0)              cr0.1<1>:ud     cr0.1<0;1,0>:ud   0x047fffff:ud
+// r11.7 is not 0. Check if r11.7 is set for continuing the single stepping.
+(W)		mov (1|M0)		f0.0<1>:ud	0x0:ud
+(W)		cmp (1|M0)     (eq)f0.0	null<1>:ud		r11.7<0;1,0>:ud 0x3:ud
+// set Breakpoint Exception Status and Control in cr0.1 to continue single stepping.
+(W&f0.0)	or  (1|M0)               cr0.1<1>:ud   cr0.1<0;1,0>:ud   0x80000000:ud
+// return to an application
+(W)		and (1|M0)               cr0.0<1>:ud   cr0.0<0;1,0>:ud   0x7FFFFFFD:ud
+#endif
+	)");
+}
+
+#define STATE_COMPUTE_MODE_ENABLE_FE_FEH               BIT(15)
+#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS          BIT(14)
+#define STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION     BIT(13)
+#define STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION BIT(9)
 
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
@@ -641,8 +799,7 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 			emit_e64b_atomic_read_page_fault(shader, pf_addr);
 		else if (data->flags & SHADER_PAGEFAULT_ATOMIC_WRITE)
 			emit_e64b_atomic_write_page_fault(shader, pf_addr);
-	}
-	else {
+	} else if (!(data->flags & TRIGGER_RESUME_SINGLE_WALK)) {
 		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 	}
 
@@ -714,8 +871,14 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 
 	sip = gpgpu_shader_create(data->drm_fd);
 
-	if ((sip->gfx_ver >= 3500) && (data->flags & SHADER_PAGEFAULT)) {
-		emit_e64b_store_arf(sip);
+	if (sip->gfx_ver >= 3500 &&
+	    (data->flags & (SHADER_PAGEFAULT | TRIGGER_RESUME_SINGLE_WALK))) {
+		if (data->flags & SHADER_PAGEFAULT)
+			emit_e64b_store_arf(sip);
+		else if (data->flags & TRIGGER_RESUME_SINGLE_WALK)
+			emit_e64b_single_step_one_sip(sip);
+		else
+			igt_assert_f(0, "Invalid SIP flags for GEN >= 3500");
 	} else {
 		if (!(data->flags & SHADER_PAGEFAULT_ONE_OF_MANY))
 			gpgpu_shader__write_aip(sip, 0);
@@ -736,10 +899,13 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 		gpgpu_shader__wait(sip);
 	}
 
-	if (data->flags & SIP_SINGLE_STEP)
-		gpgpu_shader__end_system_routine_step_if_eq(sip, w_dim.y, 0);
-	else
+	if (data->flags & SIP_SINGLE_STEP) {
+		/* Single-step-one for gen >= 3500 does not need ending code */
+		if (!(sip->gfx_ver >= 3500 && data->flags & TRIGGER_RESUME_SINGLE_WALK))
+			gpgpu_shader__end_system_routine_step_if_eq(sip, w_dim.y, 0);
+	} else {
 		gpgpu_shader__end_system_routine(sip);
+	}
 
 	return sip;
 }
@@ -1439,6 +1605,112 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 			data->single_step_bitmask[i] &= ~att->bitmask[i];
 }
 
+/*
+ * Read, log, and skip all queued sync-host events.
+ *
+ * Intended to be called from within a sync-host trigger to
+ * drain queued sync-host events which may be generated
+ * in abundance.
+ * With this the debugger_worker_loop will see a single
+ * sync-host event and will call a single trigger for that.
+ * However all sync-host event will be logged in event's log.
+ */
+#define MAX_EVENT_SIZE (32 * 1024)
+static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
+{
+	struct drm_xe_eudebug_event_sync_host e = {};
+	struct pollfd p = { .events = POLLIN };
+	int ret;
+
+	p.fd = d->fd;
+	do {
+		/* No timeout, checking for queued data */
+		ret = poll(&p, 1, 0);
+
+		if (ret == -1) {
+			igt_info("%s(): poll failed with errno %d\n",
+				 __func__, errno);
+			break;
+		}
+
+		/* Timeout - no more sync-host queued */
+		if (!ret)
+			break;
+
+		if (ret == 1 && (p.revents & POLLIN)) {
+			e.base.type = DRM_XE_EUDEBUG_EVENT_READ;
+			e.base.flags = 0;
+			e.base.len = sizeof(e);
+
+			/*
+			 * While flood of SYNC_HOST event is expected
+			 * there could be a case where other events
+			 * may started to come to.
+			 * In all error cases simply exit. This is recoverable.
+			 */
+			if (ioctl(d->fd,
+				  DRM_XE_EUDEBUG_IOCTL_READ_EVENT,
+				  &e.base))
+				break;
+
+			++d->event_count;
+			xe_eudebug_event_log_write(d->log, &e.base);
+			/* The test is screwed already. Will fail */
+			igt_assert(e.base.type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
+		}
+	} while(1);
+}
+
+static void sync_host_resume_single_step_trigger(struct xe_eudebug_debugger *d,
+						 struct drm_xe_eudebug_event *e)
+{
+	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	const int threads = get_number_of_threads(d->ptr);
+	struct online_debug_data *data = d->ptr;
+	uint32_t val;
+
+	igt_assert(d->flags & TRIGGER_RESUME_PARALLEL_WALK);
+
+	if (data->steps_done >= SINGLE_STEP_COUNT)
+		return;
+
+	read_queued_sync_host_events(d);
+
+	get_aips_offset_table(data, threads);
+
+	if (data->stepped_threads_count != -1)
+		if (data->steps_done < SINGLE_STEP_COUNT) {
+			int stepped_threads_count_after_resume =
+				get_stepped_threads_count(data, threads);
+			igt_debug("Stepped threads after: %d\n",
+				  stepped_threads_count_after_resume);
+
+			if (stepped_threads_count_after_resume == threads) {
+				data->first_aip += 0x10;
+				data->steps_done++;
+			}
+
+			igt_debug("Shader steps: %d\n", data->steps_done);
+			igt_assert(data->stepped_threads_count == 0);
+			igt_assert(stepped_threads_count_after_resume == threads);
+		}
+
+	if (data->steps_done < SINGLE_STEP_COUNT) {
+		data->stepped_threads_count = get_stepped_threads_count(data, threads);
+		igt_debug("Stepped threads before: %d\n", data->stepped_threads_count);
+	}
+
+	val = data->steps_done < SINGLE_STEP_COUNT ? STEERING_SINGLE_STEP :
+							     STEERING_CONTINUE;
+
+	vm_write_target_u32(data, val, steering_offset(threads));
+	fsync(data->vm_fd);
+
+	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, es->client_handle,
+						    es->exec_queue_handle, es->lrc_handle,
+						    NULL, 0);
+}
+
 static bool set_resume_on_halted_thread(struct online_debug_data *data)
 {
 	uint32_t thread_resume_pos = offsetof(struct sip_arf_dump, rsvd1.thread_resume);
@@ -1497,6 +1769,223 @@ static void sync_host_e64_resume_trigger(struct xe_eudebug_debugger *d,
 				      NULL, 0);
 
 	count++;
+}
+
+static void sso_e64_resume_thread(struct online_debug_data *data,
+			      uint32_t thread_num,
+			      uint32_t flags)
+{
+	struct sip_arf_sso arfs = { .resume = flags };
+
+	vm_write_target(data, &arfs, sizeof(arfs), thread_num * sizeof(arfs));
+	fsync(data->vm_fd);
+}
+
+static uint64_t sso_e64_get_aip_from_arf(struct sip_arf_sso *arf)
+{
+	/*
+	 * BSpec 56624, 77810: bits 2:0 for AIP Lower are reserved
+	 *       and marked as MBZ.
+	 */
+	return ((uint64_t)arf->aiph << 32) + ((uint64_t)arf->aipl & ~0x7);
+}
+
+static bool sso_e64_is_thread_stopped(struct online_debug_data *data, uint32_t i)
+{
+	return data->sso.arfs[i].thread_halted == 0xdead;
+}
+
+static void sso_e64_copy_aip(struct online_debug_data *data)
+{
+	int i = 0;
+
+	if (!data->sso.thread_last_aip)
+		return;
+
+	/* Update only when thread moved from not halted to halted */
+	for (i = 0; i < data->w_dim.y * data->w_dim.x; i++)
+		if (sso_e64_is_thread_stopped(data, i) &&
+		    !data->sso.thread_last_aip[i])
+				data->sso.thread_last_aip[i] =
+					sso_e64_get_aip_from_arf(&data->sso.arfs[i]);
+}
+
+static void sso_e64_read_arf(struct online_debug_data *data)
+{
+	struct sip_arf_sso *arfs;
+	size_t sz = data->thread_count * sizeof(*arfs);
+
+	if (!data->sso.arfs) {
+		arfs = malloc(sz);
+		igt_assert(arfs);
+	} else {
+		arfs = data->sso.arfs;
+	}
+	memset(arfs, 0, sz);
+	fsync(data->vm_fd);
+
+	vm_read_target(data, arfs, sz, 0);
+
+	data->sso.arfs = arfs;
+	sso_e64_copy_aip(data);
+}
+
+static uint32_t sso_e64_get_next_stopped_thread(uint32_t current,
+					struct online_debug_data *data)
+{
+	uint32_t thread = data->sso.current_thread;
+	uint32_t count = 0;
+
+	do {
+		thread = (thread + 1) % (data->w_dim.x * data->w_dim.y);
+		igt_assert(++count <= data->w_dim.x * data->w_dim.y);
+	} while(!sso_e64_is_thread_stopped(data, thread));
+
+	return thread;
+}
+
+static uint32_t sso_e64_get_first_stopped_thread(struct online_debug_data *data)
+{
+	uint32_t thread = 0;
+
+	for (thread = 0; thread < data->w_dim.x * data->w_dim.y; thread++)
+		if (sso_e64_is_thread_stopped(data, thread))
+			return thread;
+
+	igt_assert_f(0, "No stopped threads found!");
+	return thread;
+}
+
+static void sso_e64_check_exceptions(struct online_debug_data *data, uint32_t i)
+{
+	/* Breakpoint exception must be reported */
+	igt_assert(data->sso.arfs[i].exctrl & SSO_CTRL_BREAKPOINT_STATUS);
+	/* but not the remaining exceptions */
+	igt_assert(!(data->sso.arfs[i].exctrl & SSO_CTRL_EXCEPTION_STATUSES));
+}
+
+static void sso_e64_compare_aip(struct online_debug_data *data, uint32_t i)
+{
+	uint64_t aip_step = 0;
+
+	if (i == data->sso.current_thread)
+		aip_step = 0x10;
+
+	igt_assert_eq_u64(data->sso.thread_last_aip[i] + aip_step,
+			  sso_e64_get_aip_from_arf(&data->sso.arfs[i]));
+}
+
+/*
+ * The single step checks is performed in a following way:
+ * 1. Every thread is resumed with single-stepping twice in a row.
+ * With every sync-host there are checks:
+ * - Thread which is single-stepped has changed AIP
+ * - There are no other exception than breakpoint (cr0.1)
+ * - Other threads did not move (stored AIP).
+ * In the end all threads are resumed without single-stepping.
+ */
+#define SINGLE_STEP_STEPS_VERIFY	0x2
+static void sync_host_e64_single_step_resume_trigger(struct xe_eudebug_debugger *d,
+						     struct drm_xe_eudebug_event *e)
+{
+	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct online_debug_data *data = d->ptr;
+	int thread_to_resume, i;
+
+	/* There could be always late delivery of SYNC-HOST event. */
+	if (data->sso.threads_checked >= data->w_dim.x * data->w_dim.y)
+		return;
+
+	/*
+	 * For this test N-number of threads are stopped many times and this
+	 * can generate large number of sync-host event per single iteration.
+	 *
+	 * Here we need only a single sync-host event to do what is needed so
+	 * the subsequent events can be just throw away
+	 */
+	read_queued_sync_host_events(d);
+
+
+	/* Re-read data at every sync-host processing */
+	sso_e64_read_arf(data);
+
+	thread_to_resume = data->sso.current_thread;
+
+	/*
+	 * Verify that:
+	 * - there is only a breakpoint exception reported!
+	 * - only the resumed thread's AIP changed (by 1 step)
+	 */
+	for (i = 0; i < data->w_dim.x * data->w_dim.y; i++) {
+
+		/* Some threads may still be queued and some already released */
+		if (!sso_e64_is_thread_stopped(data, i)) {
+			if (i == thread_to_resume)
+				goto resume;
+			else
+				continue;
+		}
+
+		sso_e64_check_exceptions(data, i);
+
+		/* In the first sync-host there is nothing to compare yet */
+		if (data->sso.thread_last_aip)
+			sso_e64_compare_aip(data, i);
+	}
+
+	/* Initially prepare and gather data  */
+	if (!data->sso.thread_last_aip) {
+		data->sso.thread_last_aip = calloc(data->w_dim.x * data->w_dim.y,
+							   sizeof(*data->sso.thread_last_aip));
+		igt_assert(data->sso.thread_last_aip);
+
+		data->sso.current_thread = sso_e64_get_first_stopped_thread(data);
+		sso_e64_copy_aip(data);
+	} else {
+		/*
+		 * In the first sync-host call there won't be any
+		 * stepping as there a breakpoint hit.
+		 * But every other call will have some thread stepped.
+		 */
+		data->sso.thread_last_aip[thread_to_resume] += 0x10;
+	}
+
+	if (data->sso.current_step < SINGLE_STEP_STEPS_VERIFY) {
+		data->sso.current_step++;
+	} else {
+		/*
+		 * If in step 2:
+		 * - release the current thread so it may end and give space to
+		 *   potentially scheduled one
+		 * - move to next thread
+		 */
+		sso_e64_resume_thread(data, thread_to_resume, SSO_THREAD_RESUME);
+		igt_debug("%s(): Thread %u verified with %u steps. Threads checked %u/%u\n",
+			  __func__, thread_to_resume, data->sso.current_step,
+			  data->sso.threads_checked + 1,
+			  data->w_dim.x * data->w_dim.y);
+		/* For last one don't look up for the next */
+		if (data->sso.threads_checked < data->w_dim.x * data->w_dim.y - 1)
+			data->sso.current_thread = sso_e64_get_next_stopped_thread(thread_to_resume, data);
+		thread_to_resume = data->sso.current_thread;
+		data->sso.current_step = 0;
+		data->sso.threads_checked++;
+	}
+
+	if (data->sso.threads_checked < data->w_dim.x * data->w_dim.y) {
+		sso_e64_resume_thread(data, thread_to_resume, SSO_THREAD_STEP);
+	} else {
+		igt_debug("%s(): All threads checked!\n", __func__);
+		free(data->sso.thread_last_aip);
+		data->sso.thread_last_aip = NULL;
+		free(data->sso.arfs);
+		data->sso.arfs = 0;
+	}
+
+ resume:
+	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, es->client_handle,
+						    es->exec_queue_handle, es->lrc_handle,
+						    NULL, 0);
 }
 
 static void open_trigger(struct xe_eudebug_debugger *d,
@@ -1963,17 +2452,23 @@ static void run_online_client_for_e64(struct xe_eudebug_client *c)
 
 	ptr = xe_bo_mmap_ext(fd, buf->handle, buf->size, PROT_READ);
 
-	/* ptr[1] => sip_arf_dump.dw01 holds eu thread's cr0.2 (aip_low) */
-	aip = ptr[1];
+	if (c->flags & SHADER_PAGEFAULT) {
+		/* ptr[1] => sip_arf_dump.dw01 holds eu thread's cr0.2 (aip_low) */
+		aip = ptr[1];
 
-	print_debug_surface(ptr, w_dim);
+		print_debug_surface(ptr, w_dim);
 
-	/* offset 1 holds cr0.2 (aip) */
-	data->thread_hit_count = count_canaries_neq_for_e64(ptr, w_dim, elm_count, 1, 0);
-	igt_assert_eq(count_canaries_eq_for_e64(ptr, w_dim, elm_count, 1, aip),
-		      data->thread_hit_count);
-	igt_debug("pagefault hit in %d threads, AIP=0x%08x\n",
-		  data->thread_hit_count, aip);
+		/* offset 1 holds cr0.2 (aip) */
+		data->thread_hit_count = count_canaries_neq_for_e64(ptr, w_dim, elm_count, 1, 0);
+		igt_assert_eq(count_canaries_eq_for_e64(ptr, w_dim, elm_count, 1, aip),
+			      data->thread_hit_count);
+
+		igt_debug("fault/exception hit in %d threads, AIP=0x%08x\n",
+			  data->thread_hit_count, aip);
+
+	} else if (data->flags & SIP_SINGLE_STEP) {
+		igt_assert_eq(data->sso.threads_checked, data->w_dim.x * data->w_dim.y);
+	}
 
 	munmap(ptr, buf->size);
 
@@ -2697,6 +3192,15 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
  * Description:
  *	Check whether read (EU thread's atomic store instruction) pagefault memory
  *	exception handling flow works or not
+ *
+ * SUBTEST: single-step-one
+ * Functionality: EU control
+ * Description:
+ *	Schedules EU workload with 16 nops after breakpoint, then single-steps
+ *	through the shader, advances one thread each step, checking if one
+ *	thread advanced every step. Due to the time constraint, only first two
+ *	shader instructions after breakpoint are validated.
+ *
  */
 static void test_basic_online_for_e64(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
@@ -2710,11 +3214,16 @@ static void test_basic_online_for_e64(int fd, struct drm_xe_engine_class_instanc
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client_for_e64, flags, data);
 
-	/* Per context debug */
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
-					sync_host_e64_resume_trigger);
+
+	/* Per context debug */
+	if (flags & SHADER_SINGLE_STEP)
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_e64_single_step_resume_trigger);
+	else
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_e64_resume_trigger);
 
 	/* for e64 pagefault read testcase */
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
@@ -3242,6 +3751,10 @@ static void test_single_step(int fd, struct drm_xe_engine_class_instance *hwe, u
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
 
+	if (flags & TRIGGER_RESUME_SINGLE_WALK)
+		igt_require_f(intel_gen(intel_get_drm_devid(fd)) < 35,
+			      "single-step-one is not yet ready for this platform.\n");
+
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
@@ -3256,6 +3769,11 @@ static void test_single_step(int fd, struct drm_xe_engine_class_instance *hwe, u
 					create_metadata_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
+
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_resume_single_step_trigger);
 
 	xe_eudebug_session_run(s);
 	online_session_check(s);
@@ -3850,9 +4368,14 @@ int igt_main()
 		test_single_step(fd, hwe, SHADER_SINGLE_STEP | SIP_SINGLE_STEP |
 				 TRIGGER_RESUME_PARALLEL_WALK);
 
-	test_gt_render_or_compute("single-step-one", fd, hwe)
-		test_single_step(fd, hwe, SHADER_SINGLE_STEP | SIP_SINGLE_STEP |
-				 TRIGGER_RESUME_SINGLE_WALK);
+	test_gt_render_or_compute("single-step-one", fd, hwe) {
+		if (gen < 35)
+			test_single_step(fd, hwe, SHADER_SINGLE_STEP | SIP_SINGLE_STEP |
+					 TRIGGER_RESUME_SINGLE_WALK);
+		else
+			test_basic_online_for_e64(fd, hwe, SHADER_SINGLE_STEP | SIP_SINGLE_STEP |
+						  TRIGGER_RESUME_SINGLE_WALK);
+	}
 
 	test_gt_render_or_compute("debugger-reopen", fd, hwe)
 		test_debugger_reopen(fd, hwe, SHADER_N_NOOP_BREAKPOINT);
