@@ -914,7 +914,7 @@ void gpgpu_shader__end_system_routine_step_if_eq(struct gpgpu_shader *shdr,
 	emit_iga64_code(shdr, end_system_routine_step_if_eq, R"(
 (W)		or  (1|M0)               cr0.0<1>:ud   cr0.0<0;1,0>:ud   0x8000:ud
 (W)		and (1|M0)               cr0.1<1>:ud   cr0.1<0;1,0>:ud   ARG(0):ud
-		SET_SHARED_SPACE_ADDR(r30, ARG(0):ud, 4)
+		SET_SHARED_SPACE_ADDR(r30, ARG(1):ud, 4)
 (W)		LOAD_SPACE_DW(r31, r30)
 		// clear the flag register
 (W)		mov (1|M0)               f0.0<1>:ud    0x0:ud
