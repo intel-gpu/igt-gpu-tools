@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#define GENISA_BF_DBG_EXCEPTION		REG_BIT(30)
+
 struct intel_bb;
 struct intel_buf;
 
