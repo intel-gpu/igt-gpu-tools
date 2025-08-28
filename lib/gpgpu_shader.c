@@ -521,7 +521,7 @@ uint32_t gpgpu_shader__get_max_threads_in_tg(struct gpgpu_shader *shdr)
 void gpgpu_shader__breakpoint_on(struct gpgpu_shader *shdr, uint32_t cmd_no)
 {
 	igt_assert(cmd_no < shdr->size / 4);
-	shdr->instr[cmd_no][0] |= 1<<30;
+	shdr->instr[cmd_no][0] |= GENISA_BF_DBG_EXCEPTION;
 }
 
 /**
