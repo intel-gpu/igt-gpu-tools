@@ -1278,7 +1278,7 @@ static uint32_t find_kernel_in_bb(struct gpgpu_shader *kernel,
 static bool set_breakpoint_once(struct xe_eudebug_debugger *d,
 				struct online_debug_data *data)
 {
-	const uint32_t breakpoint_bit = 1 << 30;
+	const uint32_t breakpoint_bit = GENISA_BF_DBG_EXCEPTION;
 	size_t sz = sizeof(uint32_t);
 	bool breakpoint_set = false;
 	struct gpgpu_shader *kernel;
