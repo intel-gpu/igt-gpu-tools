@@ -4276,7 +4276,6 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 	struct xe_eudebug_session **s;
 	struct online_debug_data **data;
 	struct drm_xe_engine_class_instance **hwe;
-	struct drm_xe_eudebug_event_eu_attention *eus;
 	uint64_t diff;
 	int attempt_mask = 0, final_mask, should_break;
 	int i;
@@ -4298,6 +4297,12 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 						save_first_exception_trigger);
 		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 						ufence_ack_trigger);
+
+		/* Per context debug */
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						save_first_exception_trigger);
 
 		igt_assert_eq(xe_eudebug_debugger_attach(s[i]->debugger, s[i]->client), 0);
 
@@ -4321,11 +4326,21 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 				should_break = 1;
 
 				usleep(WORKLOAD_DELAY_US);
-				eus = (struct drm_xe_eudebug_event_eu_attention *)data[i]->exception_event;
-				eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd,
-					      eus->client_handle, eus->exec_queue_handle,
-					      eus->lrc_handle, eus->bitmask, eus->bitmask_size);
-				free(eus);
+				if (intel_gen_per_context_eudebug(fd)) {
+					struct drm_xe_eudebug_event_sync_host *seus;
+					seus = (struct drm_xe_eudebug_event_sync_host *)data[i]->exception_event;
+					eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd, seus->client_handle,
+						      seus->exec_queue_handle, seus->lrc_handle, NULL, 0);
+					free(seus);
+				}
+				else {
+					struct drm_xe_eudebug_event_eu_attention *eus;
+					eus = (struct drm_xe_eudebug_event_eu_attention *)data[i]->exception_event;
+					eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd,
+						      eus->client_handle, eus->exec_queue_handle,
+						      eus->lrc_handle, eus->bitmask, eus->bitmask_size);
+					free(eus);
+				}
 
 			}
 
