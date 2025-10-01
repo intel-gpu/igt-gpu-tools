@@ -1591,14 +1591,17 @@ void xe_eudebug_debugger_kill(struct xe_eudebug_debugger *d, int sig)
 }
 
 /**
- * xe_eudebug_client_create:
+ * xe_eudebug_client_create_timeout:
  * @master_fd: xe client used to open the debugger connection
  * @work: function that opens xe device and executes arbitrary workload
  * @flags: flags stored in a client structure, can be used at will
  * of the caller, i.e. to provide the @work function an additional switch.
  * @data: test's private data, allocated with MAP_SHARED | MAP_ANONYMOUS,
- * can be shared between client and debugger. Accesible via client->ptr.
+ * can be shared between client and debugger. Accessible via client->ptr.
  * Can be NULL.
+ * @timeout: time period during which the client is expected to finish
+ * its workload
+ *
  *
  * Forks and creates the debugger process. @work won't be called until
  * xe_eudebug_client_start is called.
@@ -1606,8 +1609,8 @@ void xe_eudebug_debugger_kill(struct xe_eudebug_debugger *d, int sig)
  * Returns: newly created xe_eudebug_debugger structure with its
  * event log initialized.
  */
-struct xe_eudebug_client *xe_eudebug_client_create(int master_fd, xe_eudebug_client_work_fn work,
-						   uint64_t flags, void *data)
+struct xe_eudebug_client *xe_eudebug_client_create_timeout(int master_fd, xe_eudebug_client_work_fn work,
+							   uint64_t flags, void *data, int timeout_s)
 {
 	struct xe_eudebug_client *c;
 
@@ -1622,7 +1625,7 @@ struct xe_eudebug_client *xe_eudebug_client_create(int master_fd, xe_eudebug_cli
 	c->done = 0;
 	c->ptr = data;
 	c->master_fd = master_fd;
-	c->timeout_ms = XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * MSEC_PER_SEC;
+	c->timeout_ms = timeout_s * MSEC_PER_SEC;
 	c->allow_dead_client = false;
 	pthread_mutex_init(&c->lock, NULL);
 
@@ -1665,6 +1668,27 @@ struct xe_eudebug_client *xe_eudebug_client_create(int master_fd, xe_eudebug_cli
 	igt_info("client running with pid %d\n", c->pid);
 
 	return c;
+}
+
+/**
+ * xe_eudebug_client_create:
+ * @master_fd: xe client used to open the debugger connection
+ * @work: function that opens xe device and executes arbitrary workload
+ * @flags: flags stored in a client structure, can be used at will
+ * of the caller, i.e. to provide the @work function an additional switch.
+ * @data: test's private data, allocated with MAP_SHARED | MAP_ANONYMOUS,
+ * can be shared between client and debugger. Accessible via client->ptr.
+ * Can be NULL.
+ *
+ * Calls xe_eudebug_client_create_timeout() with default timeout
+ *
+ * Returns: newly created xe_eudebug_debugger structure with its
+ * event log initialized.
+ */
+struct xe_eudebug_client *xe_eudebug_client_create(int master_fd, xe_eudebug_client_work_fn work,
+                                                   uint64_t flags, void *data)
+{
+	return xe_eudebug_client_create_timeout(master_fd, work, flags, data, XE_EUDEBUG_DEFAULT_TIMEOUT_SEC);
 }
 
 /**
