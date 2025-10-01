@@ -206,6 +206,9 @@ void xe_eudebug_debugger_wait_stage(struct xe_eudebug_session *s, uint64_t stage
 void xe_eudebug_debugger_kill(struct xe_eudebug_debugger *d, int sig);
 
 struct xe_eudebug_client *
+xe_eudebug_client_create_timeout(int master_fd, xe_eudebug_client_work_fn work,
+                                 uint64_t flags, void *data, int timeout_s);
+struct xe_eudebug_client *
 xe_eudebug_client_create(int xe, xe_eudebug_client_work_fn work, uint64_t flags, void *data);
 void xe_eudebug_client_destroy(struct xe_eudebug_client *c);
 void xe_eudebug_client_start(struct xe_eudebug_client *c);
