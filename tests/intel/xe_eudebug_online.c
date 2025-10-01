@@ -84,6 +84,8 @@
 
 #define PAGE_SIZE 4096
 
+#define XE_EUDEBUG_DEFAULT_CACHING_TIMEOUT_SEC  60ULL
+
 struct dim_t {
 	uint32_t x;
 	uint32_t y;
@@ -1215,7 +1217,7 @@ static void run_online_client(struct xe_eudebug_client *c)
 		xe_eudebug_client_wait_stage(c, DEBUGGER_REATTACHED);
 	else
 		/* Make sure it wasn't the timeout. */
-		igt_assert(igt_nsec_elapsed(&ts) < XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * NSEC_PER_SEC);
+		igt_assert_lt_u64(igt_nsec_elapsed(&ts), c->timeout_ms * NSEC_PER_MSEC);
 
 	if (!(c->flags & DO_NOT_EXPECT_CANARIES)) {
 		ptr = xe_bo_mmap_ext(fd, buf->handle, buf->size, PROT_READ);
@@ -2428,7 +2430,13 @@ static void test_caching(int fd, struct drm_xe_engine_class_instance *hwe, int f
 		igt_skip_on_f(!xe_has_vram(fd), "Device does not have VRAM.\n");
 
 	data = online_debug_data_create(fd, hwe, flags);
-	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
+
+	s = calloc(1, sizeof(*s));
+	igt_assert(s);
+
+	s->client = xe_eudebug_client_create_timeout(fd, run_online_client, flags, data, XE_EUDEBUG_DEFAULT_CACHING_TIMEOUT_SEC);
+	s->debugger = xe_eudebug_debugger_create(fd, flags, data);
+	s->flags = flags;
 
 	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
