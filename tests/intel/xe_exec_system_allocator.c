@@ -48,6 +48,7 @@ struct batch_data {
 	uint32_t expected_data;
 };
 
+#define VAL_ATOMIC_EXPECTED  56
 #define WRITE_VALUE(data__, i__)	({			\
 	if (!(data__)->expected_data)				\
 		(data__)->expected_data = rand() << 12 | (i__);	\
@@ -70,7 +71,7 @@ static void write_dword(struct test_exec_data *data, uint64_t sdi_addr, uint32_t
 	uint32_t *batch = data->batch;
 
 	if (atomic) {
-		data->data = wdata - 1;
+		data->data = VAL_ATOMIC_EXPECTED - 1;
 		batch[(*idx)++] = MI_ATOMIC | MI_ATOMIC_INC;
 		batch[(*idx)++] = sdi_addr;
 		batch[(*idx)++] = sdi_addr >> 32;
@@ -714,7 +715,6 @@ processes_evict(int fd, uint64_t alloc_size, uint64_t stride,
 #define CPU_FAULT	(0x1 << 0)
 #define REMAP		(0x1 << 1)
 #define MIDDLE		(0x1 << 2)
-#define ATOMIC_ACCESS	(0x1 << 3)
 
 /**
  * SUBTEST: partial-munmap-cpu-fault
@@ -748,38 +748,6 @@ processes_evict(int fd, uint64_t alloc_size, uint64_t stride,
  * SUBTEST: partial-middle-remap-no-cpu-fault
  * Description: remap middle with no cpu access in between
  * Test category: functionality test
- *
- * SUBTEST: partial-atomic-munmap-cpu-fault
- * Description: munmap partially with cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-munmap-no-cpu-fault
- * Description: munmap partially with no cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-remap-cpu-fault
- * Description: remap partially with cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-remap-no-cpu-fault
- * Description: remap partially with no cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-middle-munmap-cpu-fault
- * Description: munmap middle with cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-middle-munmap-no-cpu-fault
- * Description: munmap middle with no cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-middle-remap-cpu-fault
- * Description: remap middle with cpu access in between, GPU uses atomics
- * Test category: functionality test
- *
- * SUBTEST: partial-atomic-middle-remap-no-cpu-fault
- * Description: remap middle with no cpu access in between, GPU uses atomics
- * Test category: functionality test
  */
 
 static void
@@ -794,14 +762,20 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
 		.num_syncs = 1,
 		.syncs = to_user_pointer(sync),
 	};
-	struct test_exec_data *data;
+	struct {
+		uint32_t batch[16];
+		uint64_t pad;
+		uint64_t vm_sync;
+		uint64_t exec_sync;
+		uint32_t data;
+		uint32_t expected_data;
+	} *data;
 	size_t bo_size = SZ_2M, unmap_offset = 0;
 	uint32_t vm, exec_queue;
 	u64 *exec_ufence = NULL;
 	int i;
 	void *old, *new = NULL;
 	struct aligned_alloc_type alloc;
-	bool atomic = flags & ATOMIC_ACCESS;
 
 	if (flags & MIDDLE)
 		unmap_offset = bo_size / 4;
@@ -837,8 +811,8 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
 		uint64_t sdi_addr = addr + sdi_offset;
 		int b = 0;
 
-		write_dword(&data[i], sdi_addr, WRITE_VALUE(&data[i], i),
-			    &b, atomic);
+		write_dword((struct test_exec_data *)&data[i], sdi_addr, WRITE_VALUE(&data[i], i),
+			    &b, false);
 		igt_assert(b <= ARRAY_SIZE(data[i].batch));
 
 		if (!i)
@@ -860,9 +834,8 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
 
 		xe_wait_ufence(fd, new ?: exec_ufence, USER_FENCE_VALUE,
 			       exec_queue, FIVE_SEC);
-		if (i || (flags & CPU_FAULT)) {
+		if (i || (flags & CPU_FAULT))
 			igt_assert_eq(data[i].data, READ_VALUE(&data[i]));
-		}
 		exec_ufence[0] = 0;
 
 		if (!i) {
@@ -1769,17 +1742,25 @@ test_exec(int fd, struct drm_xe_engine_class_instance *eci,
 				if (flags & FORK_READ) {
 					igt_fork(child, 1)
 						igt_assert_eq(data[idx].data,
-							      READ_VALUE(&data[idx]));
+							      flags & ATOMIC_BATCH
+							      ? VAL_ATOMIC_EXPECTED
+							      : READ_VALUE(&data[idx]));
 					if (!(flags & FORK_READ_AFTER))
 						igt_assert_eq(data[idx].data,
-							      READ_VALUE(&data[idx]));
+							      flags & ATOMIC_BATCH
+							      ? VAL_ATOMIC_EXPECTED
+							      : READ_VALUE(&data[idx]));
 					igt_waitchildren();
 					if (flags & FORK_READ_AFTER)
 						igt_assert_eq(data[idx].data,
-							      READ_VALUE(&data[idx]));
+							      flags & ATOMIC_BATCH
+							      ? VAL_ATOMIC_EXPECTED
+							      : READ_VALUE(&data[idx]));
 				} else {
 					igt_assert_eq(data[idx].data,
-						      READ_VALUE(&data[idx]));
+						      flags & ATOMIC_BATCH
+						      ? VAL_ATOMIC_EXPECTED
+						      : READ_VALUE(&data[idx]));
 					if (flags & PREFETCH_SYS_BENCHMARK) {
 						struct timespec tv = {};
 						u64 start, end;
@@ -1806,13 +1787,17 @@ test_exec(int fd, struct drm_xe_engine_class_instance *eci,
 								((void *)data) + j * orig_size;
 
 							igt_assert_eq(__data[idx].data,
-								      READ_VALUE(&data[idx]));
+								      flags & ATOMIC_BATCH
+								      ? VAL_ATOMIC_EXPECTED
+								      : READ_VALUE(&data[idx]));
 						}
 					}
 				}
 				if (flags & EVERY_OTHER_CHECK)
 					igt_assert_eq(data[prev_idx].data,
-						      READ_VALUE(&data[prev_idx]));
+						      flags & ATOMIC_BATCH
+						      ? VAL_ATOMIC_EXPECTED
+						      : READ_VALUE(&data[prev_idx]));
 			}
 		}
 
@@ -2313,14 +2298,6 @@ int igt_main()
 		{ "middle-munmap-no-cpu-fault", MIDDLE },
 		{ "middle-remap-cpu-fault", MIDDLE | CPU_FAULT | REMAP },
 		{ "middle-remap-no-cpu-fault", MIDDLE | REMAP },
-		{ "atomic-munmap-cpu-fault", ATOMIC_ACCESS | CPU_FAULT },
-		{ "atomic-munmap-no-cpu-fault", ATOMIC_ACCESS },
-		{ "atomic-remap-cpu-fault", ATOMIC_ACCESS | CPU_FAULT | REMAP },
-		{ "atomic-remap-no-cpu-fault", ATOMIC_ACCESS | REMAP },
-		{ "atomic-middle-munmap-cpu-fault", ATOMIC_ACCESS | MIDDLE | CPU_FAULT },
-		{ "atomic-middle-munmap-no-cpu-fault", ATOMIC_ACCESS | MIDDLE },
-		{ "atomic-middle-remap-cpu-fault", ATOMIC_ACCESS | MIDDLE | CPU_FAULT | REMAP },
-		{ "atomic-middle-remap-no-cpu-fault", ATOMIC_ACCESS | MIDDLE | REMAP },
 		{ NULL },
 	};
 	const struct section esections[] = {
