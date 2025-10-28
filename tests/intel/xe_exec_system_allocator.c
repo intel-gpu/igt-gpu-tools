@@ -777,7 +777,6 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
 #define PROCESSES		(0x1 << 24)
 #define PREFETCH_BENCHMARK	(0x1 << 25)
 #define PREFETCH_SYS_BENCHMARK	(0x1 << 26)
-#define MADVISE_SWIZZLE			(0x1 << 27)
 
 #define N_MULTI_FAULT		4
 
@@ -886,9 +885,7 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
  * arg[1]:
  *
  * @malloc:				malloc single buffer for all execs, issue a command which will trigger multiple faults
- * @malloc-madvise:			malloc single buffer for all execs, issue a command which will trigger multiple faults, performs madvise operation
  * @malloc-prefetch:			malloc single buffer for all execs, prefetch buffer before each exec
- * @malloc-prefetch-madvise:		malloc single buffer for all execs, prefetch buffer before each exec, performs madvise operation
  * @malloc-multi-fault:			malloc single buffer for all execs
  * @malloc-fork-read:			malloc single buffer for all execs, fork a process to read test output
  * @malloc-fork-read-after:		malloc single buffer for all execs, fork a process to read test output, check again after fork returns in parent
@@ -900,7 +897,6 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
  * @mmap:				mmap single buffer for all execs
  * @mmap-prefetch:			mmap single buffer for all execs, prefetch buffer before each exec
  * @mmap-remap:				mmap and mremap a buffer for all execs
- * @mmap-remap-madvise:			mmap and mremap a buffer for all execs, performs madvise operations
  * @mmap-remap-dontunmap:		mmap and mremap a buffer with dontunmap flag for all execs
  * @mmap-remap-ro:			mmap and mremap a read-only buffer for all execs
  * @mmap-remap-ro-dontunmap:		mmap and mremap a read-only buffer with dontunmap flag for all execs
@@ -920,20 +916,16 @@ partial(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
  * @mmap-file-mlock:			mmap and mlock single buffer, with file backing, for all execs
  * @mmap-race:				mmap single buffer for all execs with race between cpu and gpu access
  * @free:				malloc and free buffer for each exec
- * @free-madvise:			malloc and free buffer for each exec, performs madvise operation
  * @free-race:				malloc and free buffer for each exec with race between cpu and gpu access
  * @new:				malloc a new buffer for each exec
- * @new-madvise:			malloc a new buffer for each exec, performs madvise operation
  * @new-prefetch:			malloc a new buffer and prefetch for each exec
  * @new-race:				malloc a new buffer for each exec with race between cpu and gpu access
  * @new-bo-map:				malloc a new buffer or map BO for each exec
  * @new-busy:				malloc a new buffer for each exec, try to unbind while buffers valid
  * @mmap-free:				mmap and free buffer for each exec
- * @mmap-free-madvise:			mmap and free buffer for each exec, performs madvise operation
  * @mmap-free-huge:			mmap huge page and free buffer for each exec
  * @mmap-free-race:			mmap and free buffer for each exec with race between cpu and gpu access
  * @mmap-new:				mmap a new buffer for each exec
- * @mmap-new-madvise:			mmap a new buffer for each exec and perform madvise operation
  * @mmap-new-huge:			mmap huge page a new buffer for each exec
  * @mmap-new-race:			mmap a new buffer for each exec with race between cpu and gpu access
  * @malloc-nomemset:			malloc single buffer for all execs, skip memset of buffers
@@ -1005,23 +997,6 @@ static void igt_require_hugepages(void)
 		      "Huge pages not reserved by the kernel!\n");
 	igt_skip_on_f(!igt_get_meminfo("HugePages_Free"),
 		      "No huge pages available!\n");
-}
-
-static void
-madvise_swizzle_op_exec(int fd, uint32_t vm, struct test_exec_data *data,
-			size_t bo_size, uint64_t addr, int index)
-{
-	int preferred_loc;
-
-	if (index % 2 == 0)
-		preferred_loc = DRM_XE_PREFERRED_LOC_DEFAULT_SYSTEM;
-	else
-		preferred_loc = DRM_XE_PREFERRED_LOC_DEFAULT_DEVICE;
-
-	xe_vm_madvise(fd, vm, to_user_pointer(data), bo_size, 0,
-		      DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC,
-		      preferred_loc,
-		      0);
 }
 
 static void
@@ -1234,9 +1209,6 @@ test_exec(int fd, struct drm_xe_engine_class_instance *eci,
 
 		if (barrier)
 			pthread_barrier_wait(barrier);
-
-		if (flags & MADVISE_SWIZZLE)
-			madvise_swizzle_op_exec(fd, vm, data, bo_size, addr, i);
 
 		if (flags & MULTI_FAULT) {
 			b = 0;
@@ -1818,9 +1790,7 @@ int igt_main()
 	struct drm_xe_engine_class_instance *hwe;
 	const struct section sections[] = {
 		{ "malloc", 0 },
-		{ "malloc-madvise", MADVISE_SWIZZLE },
 		{ "malloc-prefetch", PREFETCH },
-		{ "malloc-prefetch-madvise", PREFETCH | MADVISE_SWIZZLE },
 		{ "malloc-multi-fault", MULTI_FAULT },
 		{ "malloc-fork-read", FORK_READ },
 		{ "malloc-fork-read-after", FORK_READ | FORK_READ_AFTER },
@@ -1832,7 +1802,6 @@ int igt_main()
 		{ "mmap", MMAP },
 		{ "mmap-prefetch", MMAP | PREFETCH },
 		{ "mmap-remap", MMAP | MREMAP },
-		{ "mmap-remap-madvise", MMAP | MREMAP | MADVISE_SWIZZLE },
 		{ "mmap-remap-dontunmap", MMAP | MREMAP | DONTUNMAP },
 		{ "mmap-remap-ro", MMAP | MREMAP | READ_ONLY_REMAP },
 		{ "mmap-remap-ro-dontunmap", MMAP | MREMAP | DONTUNMAP |
@@ -1859,20 +1828,16 @@ int igt_main()
 		{ "mmap-file-mlock", MMAP | LOCK | FILE_BACKED },
 		{ "mmap-race", MMAP | RACE },
 		{ "free", NEW | FREE },
-		{ "free-madvise", NEW | FREE | MADVISE_SWIZZLE },
 		{ "free-race", NEW | FREE | RACE },
 		{ "new", NEW },
-		{ "new-madvise", NEW | MADVISE_SWIZZLE },
 		{ "new-prefetch", NEW | PREFETCH },
 		{ "new-race", NEW | RACE },
 		{ "new-bo-map", NEW | BO_MAP },
 		{ "new-busy", NEW | BUSY },
 		{ "mmap-free", MMAP | NEW | FREE },
-		{ "mmap-free-madvise", MMAP | NEW | FREE | MADVISE_SWIZZLE },
 		{ "mmap-free-huge", MMAP | NEW | FREE | HUGE_PAGE },
 		{ "mmap-free-race", MMAP | NEW | FREE | RACE },
 		{ "mmap-new", MMAP | NEW },
-		{ "mmap-new-madvise", MMAP | NEW | MADVISE_SWIZZLE },
 		{ "mmap-new-huge", MMAP | NEW | HUGE_PAGE },
 		{ "mmap-new-race", MMAP | NEW | RACE },
 		{ "malloc-nomemset", SKIP_MEMSET },
