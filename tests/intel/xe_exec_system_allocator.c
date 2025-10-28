@@ -1304,7 +1304,6 @@ madvise_prefetch_op(int fd, uint32_t vm, uint64_t addr, size_t bo_size,
 			return;
 		}
 
-		free(mem_attrs);
 	} else if (flags & PREFETCH_SAME_ATTR) {
 		xe_vm_madvise_atomic_attr(fd, vm, to_user_pointer(data), bo_size,
 					  DRM_XE_ATOMIC_GLOBAL);
@@ -1320,7 +1319,6 @@ madvise_prefetch_op(int fd, uint32_t vm, uint64_t addr, size_t bo_size,
 
 		xe_vm_madvise_atomic_attr(fd, vm, to_user_pointer(data), bo_size / 2,
 					  DRM_XE_ATOMIC_GLOBAL);
-		free(mem_attrs);
 	} else if (flags & PREFETCH_CHANGE_ATTR) {
 		xe_vm_madvise_atomic_attr(fd, vm, to_user_pointer(data), bo_size,
 					  DRM_XE_ATOMIC_GLOBAL);
@@ -1336,8 +1334,8 @@ madvise_prefetch_op(int fd, uint32_t vm, uint64_t addr, size_t bo_size,
 		xe_vm_madvise_atomic_attr(fd, vm, to_user_pointer(data), bo_size,
 					  DRM_XE_ATOMIC_DEVICE);
 		}
-		free(mem_attrs);
 	}
+	free(mem_attrs);
 }
 
 static void
