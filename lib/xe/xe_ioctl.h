@@ -106,7 +106,5 @@ void xe_vm_madvise(int fd, uint32_t vm, uint64_t addr, uint64_t range, uint64_t 
 int xe_vm_number_vmas_in_range(int fd, struct drm_xe_vm_query_mem_range_attr *vmas_attr);
 int xe_vm_vma_attrs(int fd, struct drm_xe_vm_query_mem_range_attr *vmas_attr,
 		    struct drm_xe_mem_range_attr *mem_attr);
-struct drm_xe_mem_range_attr
-*xe_vm_get_mem_attr_values_in_range(int fd, uint32_t vm, uint64_t start,
-				    uint64_t range, uint32_t *num_ranges);
+int xe_vm_print_mem_attr_values_in_range(int fd, uint32_t vm, uint64_t start, uint64_t range);
 #endif /* XE_IOCTL_H */

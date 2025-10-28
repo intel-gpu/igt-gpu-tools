@@ -79,23 +79,20 @@ int xe_vm_vma_attrs(int fd, struct drm_xe_vm_query_mem_range_attr *vmas_attr,
 }
 
 /**
- * xe_vm_get_mem_attr_values_in_range:
+ * xe_vm_print_mem_attr_values_in_range:
  * @fd: xe device fd
  * @vm: vm_id of the virtual range
  * @start: start of the virtual address range
  * @range: size of the virtual address range
- * @num_ranges: number of vma ranges
  *
  * Calls QUERY_MEM_RANGES_ATTRS ioctl to get memory attributes for different
- * memory ranges from KMD. return memory attributes as returned by KMD for
+ * memory ranges from KMD. prints memory attributes as returned by KMD for
  * atomic, prefrred loc and pat index types.
  *
- * Returns struct drm_xe_mem_range_attr for success or error for failure
+ * Returns 0 for success or error for failure
  */
 
-struct drm_xe_mem_range_attr
-*xe_vm_get_mem_attr_values_in_range(int fd, uint32_t vm, uint64_t start,
-				    uint64_t range, uint32_t *num_ranges)
+int xe_vm_print_mem_attr_values_in_range(int fd, uint32_t vm, uint64_t start, uint64_t range)
 {
 	void *ptr_start, *ptr;
 	int err;
@@ -116,26 +113,22 @@ struct drm_xe_mem_range_attr
 		igt_warn("ioctl failed for xe_vm_number_vmas_in_range\n");
 		igt_debug("vmas_in_range err = %d query.num_mem_ranges = %u query.sizeof_mem_range_attr=%lld\n",
 			  err, query.num_mem_ranges, query.sizeof_mem_range_attr);
-		return NULL;
+		return err;
 	}
 
 	/* Allocate buffer for the memory region attributes */
 	ptr = malloc(query.num_mem_ranges * query.sizeof_mem_range_attr);
 	ptr_start = ptr;
 
-	if (!ptr) {
-		igt_debug("memory allocation failed\n");
-		return NULL;
-	}
+	if (!ptr)
+		return -ENOMEM;
 
 	err = xe_vm_vma_attrs(fd, &query, ptr);
 	if (err) {
 		igt_warn("ioctl failed for vma_attrs err = %d\n", err);
-		free(ptr_start);
-		return NULL;
+		return err;
 	}
 
-	ptr = ptr_start; // Reset pointer for iteration
 	/* Iterate over the returned memory region attributes */
 	for (unsigned int i = 0; i < query.num_mem_ranges; ++i) {
 		struct drm_xe_mem_range_attr *mem_attrs = (struct drm_xe_mem_range_attr *)ptr;
@@ -151,10 +144,8 @@ struct drm_xe_mem_range_attr
 		ptr += query.sizeof_mem_range_attr;
 	}
 
-	if (num_ranges)
-		*num_ranges = query.num_mem_ranges;
-
-	return (struct drm_xe_mem_range_attr *)ptr_start;
+	free(ptr_start);
+	return 0;
 }
 
 uint32_t xe_vm_create(int fd, uint32_t flags, uint64_t ext)
