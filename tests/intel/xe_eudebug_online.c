@@ -3420,7 +3420,8 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	struct online_debug_data *debugee_data;
 	struct xe_eudebug_session *s;
 	struct xe_eudebug_client *debugee;
-	int debugee_flags = SHADER_LOOP | DO_NOT_EXPECT_CANARIES;
+	uint64_t debugee_flags = SHADER_LOOP | DO_NOT_EXPECT_CANARIES;
+	int ret;
 
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
@@ -3428,6 +3429,17 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		/* Per context debug */
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_resume_trigger);
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						save_first_exception_trigger);
+	}
+
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
@@ -3449,39 +3461,49 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, debugee), 0);
 	xe_eudebug_client_start(debugee);
 
-	igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
-		if (READ_ONCE(debugee_data->vm_fd) == -1 || READ_ONCE(debugee_data->target_size) == 0)
-			continue;
+	igt_debug("Waiting for debugee.\n");
+	igt_for_milliseconds(3 * STARTUP_TIMEOUT_MS) {
+		pthread_mutex_lock(&debugee_data->mutex);
+		ret = debugee_data->acked;
+		pthread_mutex_unlock(&debugee_data->mutex);
+		if (ret)
+			break;
+		usleep(10000);
+	}
+	igt_assert_f(ret, "Timeout waiting for debugee.\n");
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		/*
+		 * eu_ctl should succeed, workload will be interrupted once it will be scheduled,
+		 * ie. after end of previous runalone workload.
+		 */
+		eu_ctl(s->debugger->fd, debugee_data->client_handle,
+		       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
+		       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
+		ret = wait_for_exception(data, STARTUP_TIMEOUT_MS);
+		set_steering_flag(data, STEERING_END_LOOP);
+		igt_assert_f(ret, "Exception arrived for wrong context.\n");
+	} else {
+		/*
+		 * Interrupting the other client should return invalid state
+		 * as it is running in runalone mode
+		 */
+		igt_assert_eq(__eu_ctl(s->debugger->fd, debugee_data->client_handle,
+				       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
+				       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
+		xe_force_gt_reset_async(s->debugger->master_fd, debugee_data->hwe.gt_id);
 	}
 
-	pthread_mutex_lock(&debugee_data->mutex);
-	igt_assert(debugee_data->client_handle != -1);
-	igt_assert(debugee_data->exec_queue_handle != -1);
-
-	/*
-	 * Interrupting the other client should return invalid state
-	 * as it is running in runalone mode
-	 */
-	igt_assert_eq(__eu_ctl(s->debugger->fd, debugee_data->client_handle,
-		      debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
-		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
-	pthread_mutex_unlock(&debugee_data->mutex);
-
-	xe_force_gt_reset_async(s->debugger->master_fd, debugee_data->hwe.gt_id);
-
-	/* First client should complete because of the reset */
 	xe_eudebug_client_wait_done(s->client);
 
 	/* Check if second workload was started and is running */
 	wait_for_workload_start(debugee_data);
-
-	/* Terminate debugee and mark it as cleaned up */
-	igt_assert_eq(kill(debugee->pid, 0), 0);
-	igt_assert_eq(debugee->done, 0);
-	kill(debugee->pid, SIGKILL);
-	igt_assert_eq(waitpid(debugee->pid, NULL, 0), debugee->pid);
-	debugee->done = 1;
-	debugee->pid = 0;
+	if (intel_gen_per_context_eudebug(fd)) {
+		ret = wait_for_exception(debugee_data, 3 * STARTUP_TIMEOUT_MS);
+		igt_assert_f(!ret, "Timeout waiting for exception.\n");
+	}
+	set_steering_flag(debugee_data, STEERING_END_LOOP);
+	xe_eudebug_client_wait_done(debugee);
 
 	xe_eudebug_debugger_stop_worker(s->debugger);
 
