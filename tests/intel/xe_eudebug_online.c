@@ -23,34 +23,34 @@
 #include "gpgpu_shader.h"
 #include <sys/wait.h>
 
-#define SHADER_NOP			(0 << 0)
-#define SHADER_BREAKPOINT		(1 << 0)
-#define SHADER_LOOP			(1 << 1)
-#define SHADER_SINGLE_STEP		(1 << 2)
-#define SIP_SINGLE_STEP			(1 << 3)
-#define DISABLE_DEBUG_MODE		(1 << 4)
-#define SHADER_N_NOOP_BREAKPOINT	(1 << 5)
-#define SHADER_CACHING_SRAM		(1 << 6)
-#define SHADER_CACHING_VRAM		(1 << 7)
-#define SHADER_MIN_THREADS		(1 << 8)
-#define DO_NOT_EXPECT_CANARIES		(1 << 9)
-#define BB_IN_SRAM			(1 << 10)
-#define BB_IN_VRAM			(1 << 11)
-#define TARGET_IN_SRAM			(1 << 12)
-#define TARGET_IN_VRAM			(1 << 13)
-#define SHADER_PAGEFAULT_READ		(1 << 14)
-#define SHADER_PAGEFAULT_WRITE		(1 << 15)
-#define FAULTABLE_VM			(1 << 16)
-#define PAGEFAULT_STRESS_TEST		(1 << 17)
-#define SHADER_PAGEFAULT_ONE_OF_MANY	(1 << 18)
-#define TRIGGER_UFENCE_SET_BREAKPOINT	(1 << 24)
-#define TRIGGER_RESUME_SINGLE_WALK	(1 << 25)
-#define TRIGGER_RESUME_PARALLEL_WALK	(1 << 26)
-#define TRIGGER_RECONNECT		(1 << 27)
-#define TRIGGER_RESUME_SET_BP		(1 << 28)
-#define TRIGGER_RESUME_DELAYED		(1 << 29)
-#define TRIGGER_RESUME_DSS		(1 << 30)
-#define TRIGGER_RESUME_ONE		(1 << 31)
+#define SHADER_NOP			0
+#define SHADER_BREAKPOINT		BIT(0)
+#define SHADER_LOOP			BIT(1)
+#define SHADER_SINGLE_STEP		BIT(2)
+#define SIP_SINGLE_STEP			BIT(3)
+#define DISABLE_DEBUG_MODE		BIT(4)
+#define SHADER_N_NOOP_BREAKPOINT	BIT(5)
+#define SHADER_CACHING_SRAM		BIT(6)
+#define SHADER_CACHING_VRAM		BIT(7)
+#define SHADER_MIN_THREADS		BIT(8)
+#define DO_NOT_EXPECT_CANARIES		BIT(9)
+#define BB_IN_SRAM			BIT(10)
+#define BB_IN_VRAM			BIT(11)
+#define TARGET_IN_SRAM			BIT(12)
+#define TARGET_IN_VRAM			BIT(13)
+#define SHADER_PAGEFAULT_READ		BIT(14)
+#define SHADER_PAGEFAULT_WRITE		BIT(15)
+#define FAULTABLE_VM			BIT(16)
+#define PAGEFAULT_STRESS_TEST		BIT(17)
+#define SHADER_PAGEFAULT_ONE_OF_MANY	BIT(18)
+#define TRIGGER_UFENCE_SET_BREAKPOINT	BIT(24)
+#define TRIGGER_RESUME_SINGLE_WALK	BIT(25)
+#define TRIGGER_RESUME_PARALLEL_WALK	BIT(26)
+#define TRIGGER_RECONNECT		BIT(27)
+#define TRIGGER_RESUME_SET_BP		BIT(28)
+#define TRIGGER_RESUME_DELAYED		BIT(29)
+#define TRIGGER_RESUME_DSS		BIT(30)
+#define TRIGGER_RESUME_ONE		BIT(31)
 
 #define SHADER_PAGEFAULT	(SHADER_PAGEFAULT_READ | SHADER_PAGEFAULT_WRITE | \
 				 SHADER_PAGEFAULT_ONE_OF_MANY)
@@ -194,7 +194,7 @@ static int get_number_of_threads(struct online_debug_data *data)
 	return 512;
 }
 
-static int caching_get_instruction_count(int fd, uint32_t s_dim__x, int flags)
+static int caching_get_instruction_count(int fd, uint32_t s_dim__x, uint64_t flags)
 {
 	uint64_t memory;
 
@@ -1113,7 +1113,7 @@ static size_t get_bb_size(int fd, struct gpgpu_shader *shader)
 	return ALIGN(shader_size, PAGE_SIZE) + xe_cs_prefetch_size(fd);
 }
 
-static uint64_t get_memory_region(int fd, int flags, int region_bitmask)
+static uint64_t get_memory_region(int fd, uint64_t flags, int region_bitmask)
 {
 	flags &= region_bitmask;
 
@@ -1573,7 +1573,7 @@ static void pagefault_trigger(struct xe_eudebug_debugger *d,
  * @one:	one thread
  * @dss:	threads running on one subslice
  */
-static void test_basic_online(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_basic_online(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -1607,7 +1607,7 @@ static void test_basic_online(int fd, struct drm_xe_engine_class_instance *hwe, 
  *	Faultable variation of test set-breakpoint.
  */
 
-static void test_set_breakpoint_online(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_set_breakpoint_online(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -1644,7 +1644,7 @@ static void test_set_breakpoint_online(int fd, struct drm_xe_engine_class_instan
  */
 static void test_set_breakpoint_online_sigint_debugger(int fd,
 						       struct drm_xe_engine_class_instance *hwe,
-						       int flags)
+						       uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -1781,7 +1781,7 @@ static int getenv_int(const char *var, int def_val)
  *     and other threads are spinning.
  */
 static void test_pagefault_online(int fd, struct drm_xe_engine_class_instance *hwe,
-				  int flags)
+				  uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -1840,7 +1840,7 @@ static void test_pagefault_online(int fd, struct drm_xe_engine_class_instance *h
  */
 static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
 {
-	int flags = SHADER_BREAKPOINT | TRIGGER_RESUME_DELAYED;
+	uint64_t flags = SHADER_BREAKPOINT | TRIGGER_RESUME_DELAYED;
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
 	struct xe_eudebug_client *other;
@@ -1885,7 +1885,7 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
  *	(stopped on breakpoint) by running the same workload again.
  */
 static void test_reset_with_attention_online(int fd, struct drm_xe_engine_class_instance *hwe,
-					     int flags)
+					     uint64_t flags)
 {
 	struct xe_eudebug_session *s1, *s2;
 	struct online_debug_data *data;
@@ -1936,7 +1936,7 @@ static void test_reset_with_attention_online(int fd, struct drm_xe_engine_class_
  * Description:
  *	Faultable variation of test interrupt-all-set-breakpoint.
  */
-static void test_interrupt_all(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_interrupt_all(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -2016,7 +2016,7 @@ static void reset_debugger_log(struct xe_eudebug_debugger *d)
  *	configured for debugging, tries to interrupt all threads using the client
  *	attached to debugger.
  */
-static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct online_debug_data *data;
 	struct online_debug_data *debugee_data;
@@ -2109,7 +2109,7 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
  *	checks negative scenarios of EU_THREADS ioctl usage, interrupts all threads,
  *	checks whether attention event came, and resumes stopped threads back.
  */
-static void test_tdctl_parameters(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_tdctl_parameters(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -2251,7 +2251,7 @@ static void eu_attention_debugger_detach_trigger(struct xe_eudebug_debugger *d,
  *	raised. The test checks if KMD resets the workload when there's
  *	no debugger attached and does the event playback on discovery.
  */
-static void test_interrupt_reconnect(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_interrupt_reconnect(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct drm_xe_eudebug_event *e = NULL;
 	struct online_debug_data *data;
@@ -2322,7 +2322,7 @@ static void test_interrupt_reconnect(int fd, struct drm_xe_engine_class_instance
  *	thread advanced every step. Due to the time constraint, only first two
  *	shader instructions after breakpoint are validated.
  */
-static void test_single_step(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_single_step(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -2372,7 +2372,7 @@ static void eu_attention_debugger_ndetach_trigger(struct xe_eudebug_debugger *d,
  *	Check whether the debugger is able to reopen the connection and
  *	capture the events of already running client.
  */
-static void test_debugger_reopen(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_debugger_reopen(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
@@ -2420,7 +2420,7 @@ static void test_debugger_reopen(int fd, struct drm_xe_engine_class_instance *hw
  * @sram:	Target surface in SRAM
  * @vram:	Target surface in VRAM
  */
-static void test_caching(int fd, struct drm_xe_engine_class_instance *hwe, int flags)
+static void test_caching(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
