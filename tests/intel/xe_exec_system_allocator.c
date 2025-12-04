@@ -1251,30 +1251,17 @@ xe_vm_parse_execute_madvise(int fd, uint32_t vm, struct test_exec_data *data,
 	}
 
 	if (flags & MADVISE_SPLIT_VMA) {
-		uint16_t dev_id = intel_get_drm_devid(fd);
-		uint64_t split_addr, split_size;
-		uint64_t alignment = SZ_4K;
-
-		if (IS_PONTEVECCHIO(dev_id))
-			alignment = SZ_64K;
-
 		if (bo_size)
-			bo_size = ALIGN(bo_size, alignment);
-
-		split_addr = to_user_pointer(data) + bo_size/2;
-		split_addr = ALIGN(split_addr, alignment);
-		split_size = bo_size / 2;
-		split_size = ALIGN(split_size, alignment);
+			bo_size = ALIGN(bo_size, SZ_4K);
 
 		bo_flags = DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM;
 		bo = xe_bo_create(fd, vm, bo_size, vram_if_possible(fd, eci->gt_id),
 				  bo_flags);
+		xe_vm_bind_async(fd, vm, 0, bo, 0, to_user_pointer(data) + bo_size / 2,
+				 bo_size / 2, 0, 0);
 
-		xe_vm_bind_async(fd, vm, 0, bo, 0, split_addr,
-				 split_size, 0, 0);
-
-		__xe_vm_bind_assert(fd, vm, 0, 0, 0, split_addr,
-				    split_size, DRM_XE_VM_BIND_OP_MAP,
+		__xe_vm_bind_assert(fd, vm, 0, 0, 0, to_user_pointer(data) + bo_size / 2,
+				    bo_size / 2, DRM_XE_VM_BIND_OP_MAP,
 				    DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR, sync,
 				    1, 0, 0);
 		xe_wait_ufence(fd, &data[0].vm_sync, USER_FENCE_VALUE, 0, FIVE_SEC);
@@ -1282,7 +1269,7 @@ xe_vm_parse_execute_madvise(int fd, uint32_t vm, struct test_exec_data *data,
 		gem_close(fd, bo);
 		bo = 0;
 
-		xe_vm_madvise_atomic_attr(fd, vm, split_addr, split_size,
+		xe_vm_madvise_atomic_attr(fd, vm, to_user_pointer(data), bo_size / 2,
 					  DRM_XE_ATOMIC_GLOBAL);
 	}
 
