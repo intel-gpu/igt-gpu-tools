@@ -5032,7 +5032,7 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 		{ "ufence-wait", OA_SYNC_TYPE_UFENCE, WAIT },
 		{ NULL },
 	};
-	const struct drm_xe_oa_unit *oau0, *oau;
+	const struct drm_xe_oa_unit *oau;
 	struct xe_device *xe_dev;
 
 	igt_fixture() {
@@ -5064,7 +5064,7 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 		/* See xe_query_oa_units_new() */
 		igt_require(xe_dev->oa_units);
 		igt_require(xe_dev->oa_units->num_oa_units);
-		oau0 = oa_unit_by_id(drm_fd, 0);
+		oau = oa_unit_by_id(drm_fd, 0);
 
 		devid = intel_get_drm_devid(drm_fd);
 		sysfs = igt_sysfs_open(drm_fd);
@@ -5103,7 +5103,7 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 			test_oa_exponents(oau);
 
 	igt_subtest_with_dynamic("buffer-fill") {
-		igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
+		igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
 		__for_oa_unit_by_type(DRM_XE_OA_UNIT_TYPE_OAG)
 			test_buffer_fill(oau);
 	}
@@ -5115,14 +5115,14 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 	igt_subtest_with_dynamic("buffer-size") {
 		long k = random() % num_buf_sizes;
 
-		igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
+		igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
 		__for_oa_unit_by_type_w_arg(DRM_XE_OA_UNIT_TYPE_OAG, buf_sizes[k].name)
 			test_non_zero_reason(oau, buf_sizes[k].size);
 	}
 
 	igt_subtest_with_dynamic("non-zero-reason") {
 		igt_require(!igt_run_in_simulation());
-		igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
+		igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
 		__for_oa_unit_by_type(DRM_XE_OA_UNIT_TYPE_OAG)
 			test_non_zero_reason(oau, 0);
 	}
@@ -5132,7 +5132,7 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 	 * Description: Non zero reason over all OA units
 	 */
 	igt_subtest_with_dynamic("non-zero-reason-all") {
-		igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
+		igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
 		__for_each_oa_unit(oau)
 			test_non_zero_reason(oau, SZ_128K);
 	}
@@ -5250,7 +5250,7 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 	igt_subtest_with_dynamic("tail-address-wrap") {
 		long k = random() % num_buf_sizes;
 
-		igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
+		igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_BUFFER_SIZE);
 		__for_oa_unit_by_type_w_arg(DRM_XE_OA_UNIT_TYPE_OAG, buf_sizes[k].name)
 			test_tail_address_wrap(oau, buf_sizes[k].size);
 	}
@@ -5266,14 +5266,14 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 
 		igt_subtest_with_dynamic("mmio-triggered-reports") {
 			igt_require(HAS_OA_MMIO_TRIGGER(devid));
-			igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_UNIT_GT_ID);
+			igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_UNIT_GT_ID);
 			__for_each_oa_unit(oau)
 				test_mmio_triggered_reports(oau, false);
 		}
 
 		igt_subtest_with_dynamic("mmio-triggered-reports-read") {
 			igt_require(HAS_OA_MMIO_TRIGGER(devid));
-			igt_require(oau0->capabilities & DRM_XE_OA_CAPS_OA_UNIT_GT_ID);
+			igt_require(oau->capabilities & DRM_XE_OA_CAPS_OA_UNIT_GT_ID);
 			__for_each_oa_unit(oau)
 				test_mmio_triggered_reports(oau, true);
 		}
@@ -5281,7 +5281,7 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 
 	igt_subtest_group() {
 		igt_fixture() {
-			igt_require(oau0->capabilities & DRM_XE_OA_CAPS_SYNCS);
+			igt_require(oau->capabilities & DRM_XE_OA_CAPS_SYNCS);
 		}
 
 		for (const struct sync_section *s = sync_sections; s->name; s++) {
