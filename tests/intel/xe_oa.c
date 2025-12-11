@@ -486,22 +486,7 @@ static u64 oa_format_fields(u64 name)
 
 static const struct drm_xe_engine_class_instance *oa_unit_engine(const struct drm_xe_oa_unit *oau)
 {
-	const struct drm_xe_engine_class_instance *hwe;
-
-	igt_assert(oau);
-
-	hwe = oau->num_engines ? &oau->eci[random() % oau->num_engines] : NULL;
-
-	/* If an OA unit has no hwe's, return a hwe from the same gt */
-	if (hwe || !(oau->capabilities & DRM_XE_OA_CAPS_OA_UNIT_GT_ID))
-		goto exit;
-
-	xe_for_each_engine(drm_fd, hwe)
-		if (hwe->gt_id == oau->gt_id)
-			break;
-	igt_assert(hwe);
-exit:
-	return hwe;
+	return !oau ? NULL : oau->num_engines ? &oau->eci[random() % oau->num_engines] : NULL;
 }
 
 static int __first_and_num_oa_units(const struct drm_xe_oa_unit **oau)
