@@ -210,12 +210,8 @@ struct drm_xe_ext_set_property {
 	/** @pad: MBZ */
 	__u32 pad;
 
-	union {
-		/** @value: property value */
-		__u64 value;
-		/** @ptr: pointer to user value */
-		__u64 ptr;
-	};
+	/** @value: property value */
+	__u64 value;
 
 	/** @reserved: Reserved */
 	__u64 reserved[2];
@@ -407,9 +403,6 @@ struct drm_xe_query_mem_regions {
  *      has low latency hint support
  *    - %DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR - Flag is set if the
  *      device has CPU address mirroring support
- *    - %DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT - Flag is set if the
- *      device supports the userspace hint %DRM_XE_GEM_CREATE_FLAG_NO_COMPRESSION.
- *      This is exposed only on Xe2+.
  *  - %DRM_XE_QUERY_CONFIG_MIN_ALIGNMENT - Minimal memory alignment
  *    required by this device, typically SZ_4K or SZ_64K
  *  - %DRM_XE_QUERY_CONFIG_VA_BITS - Maximum bits of a virtual address
@@ -428,7 +421,6 @@ struct drm_xe_query_config {
 	#define DRM_XE_QUERY_CONFIG_FLAG_HAS_VRAM	(1 << 0)
 	#define DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY	(1 << 1)
 	#define DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR	(1 << 2)
-	#define DRM_XE_QUERY_CONFIG_FLAG_HAS_NO_COMPRESSION_HINT (1 << 3)
 #define DRM_XE_QUERY_CONFIG_MIN_ALIGNMENT		2
 #define DRM_XE_QUERY_CONFIG_VA_BITS			3
 #define DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY	4
@@ -779,11 +771,7 @@ struct drm_xe_device_query {
  *    until the object is either bound to a virtual memory region via
  *    VM_BIND or accessed by the CPU. As a result, no backing memory is
  *    reserved at the time of GEM object creation.
- *  - %DRM_XE_GEM_CREATE_FLAG_SCANOUT - Indicates that the GEM object is
- *    intended for scanout via the display engine. When set, kernel ensures
- *    that the allocation is placed in a memory region compatible with the
- *    display engine requirements. This may impose restrictions on tiling,
- *    alignment, and memory placement to guarantee proper display functionality.
+ *  - %DRM_XE_GEM_CREATE_FLAG_SCANOUT
  *  - %DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM - When using VRAM as a
  *    possible placement, ensure that the corresponding VRAM allocation
  *    will always use the CPU accessible part of VRAM. This is important
@@ -799,17 +787,6 @@ struct drm_xe_device_query {
  *    need to use VRAM for display surfaces, therefore the kernel requires
  *    setting this flag for such objects, otherwise an error is thrown on
  *    small-bar systems.
- *  - %DRM_XE_GEM_CREATE_FLAG_NO_COMPRESSION - Allows userspace to
- *    hint that compression (CCS) should be disabled for the buffer being
- *    created. This can avoid unnecessary memory operations and CCS state
- *    management.
- *    On pre-Xe2 platforms, this flag is currently rejected as compression
- *    control is not supported via PAT index. On Xe2+ platforms, compression
- *    is controlled via PAT entries. If this flag is set, the driver will reject
- *    any VM bind that requests a PAT index enabling compression for this BO.
- *    Note: On dGPU platforms, there is currently no change in behavior with
- *    this flag, but future improvements may leverage it. The current benefit is
- *    primarily applicable to iGPU platforms.
  *
  * @cpu_caching supports the following values:
  *  - %DRM_XE_GEM_CPU_CACHING_WB - Allocate the pages with write-back
@@ -856,7 +833,6 @@ struct drm_xe_gem_create {
 #define DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING		(1 << 0)
 #define DRM_XE_GEM_CREATE_FLAG_SCANOUT			(1 << 1)
 #define DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM	(1 << 2)
-#define DRM_XE_GEM_CREATE_FLAG_NO_COMPRESSION		(1 << 3)
 	/**
 	 * @flags: Flags, currently a mask of memory instances of where BO can
 	 * be placed
@@ -1037,20 +1013,6 @@ struct drm_xe_vm_destroy {
  *    valid on VMs with DRM_XE_VM_CREATE_FLAG_FAULT_MODE set. The CPU address
  *    mirror flag are only valid for DRM_XE_VM_BIND_OP_MAP operations, the BO
  *    handle MBZ, and the BO offset MBZ.
- *  - %DRM_XE_VM_BIND_FLAG_MADVISE_AUTORESET - Can be used in combination with
- *    %DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR to reset madvises when the underlying
- *    CPU address space range is unmapped (typically with munmap(2) or brk(2)).
- *    The madvise values set with &DRM_IOCTL_XE_MADVISE are reset to the values
- *    that were present immediately after the &DRM_IOCTL_XE_VM_BIND.
- *    The reset GPU virtual address range is the intersection of the range bound
- *    using &DRM_IOCTL_XE_VM_BIND and the virtual CPU address space range
- *    unmapped.
- *    This functionality is present to mimic the behaviour of CPU address space
- *    madvises set using madvise(2), which are typically reset on unmap.
- *    Note: free(3) may or may not call munmap(2) and/or brk(2), and may thus
- *    not invoke autoreset. Neither will stack variables going out of scope.
- *    Therefore it's recommended to always explicitly reset the madvises when
- *    freeing the memory backing a region used in a &DRM_IOCTL_XE_MADVISE call.
  *
  * The @prefetch_mem_region_instance for %DRM_XE_VM_BIND_OP_PREFETCH can also be:
  *  - %DRM_XE_CONSULT_MEM_ADVISE_PREF_LOC, which ensures prefetching occurs in
@@ -1157,7 +1119,6 @@ struct drm_xe_vm_bind_op {
 #define DRM_XE_VM_BIND_FLAG_DUMPABLE	(1 << 3)
 #define DRM_XE_VM_BIND_FLAG_CHECK_PXP	(1 << 4)
 #define DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR	(1 << 5)
-#define DRM_XE_VM_BIND_FLAG_MADVISE_AUTORESET	(1 << 6)
 	/** @flags: Bind flags */
 	__u32 flags;
 
@@ -1312,7 +1273,6 @@ struct drm_xe_exec_queue_create {
 #define   DRM_XE_EXEC_QUEUE_SET_PROPERTY_PRIORITY		0
 #define   DRM_XE_EXEC_QUEUE_SET_PROPERTY_TIMESLICE		1
 #define   DRM_XE_EXEC_QUEUE_SET_PROPERTY_PXP_TYPE		2
-#define   DRM_XE_EXEC_QUEUE_SET_HANG_REPLAY_STATE		3
 	/** @extensions: Pointer to the first extension struct, if any */
 	__u64 extensions;
 
@@ -1697,19 +1657,12 @@ struct drm_xe_oa_unit {
 #define DRM_XE_OA_CAPS_OA_BUFFER_SIZE	(1 << 2)
 #define DRM_XE_OA_CAPS_WAIT_NUM_REPORTS	(1 << 3)
 #define DRM_XE_OA_CAPS_OAM		(1 << 4)
-#define DRM_XE_OA_CAPS_OA_UNIT_GT_ID	(1 << 5)
 
 	/** @oa_timestamp_freq: OA timestamp freq */
 	__u64 oa_timestamp_freq;
 
-	/** @gt_id: gt id for this OA unit */
-	__u16 gt_id;
-
-	/** @reserved1: MBZ */
-	__u16 reserved1[3];
-
 	/** @reserved: MBZ */
-	__u64 reserved[3];
+	__u64 reserved[4];
 
 	/** @num_engines: number of engines in @eci array */
 	__u64 num_engines;
