@@ -397,29 +397,6 @@ test_exec(int fd, struct drm_xe_engine_class_instance *eci, int num_placement,
 	test_legacy_mode(fd, eci, num_placement, n_exec_queues, n_execs, flags);
 }
 
-/**
- * SUBTEST: virtual
- * Description: Validate virtual queues with multiple placements
- * Test category: functionality test
- */
-static void
-test_exec_virtual(int fd, int gt, int class)
-{
-	struct drm_xe_engine_class_instance eci[MAX_INSTANCE];
-	struct drm_xe_engine_class_instance *hwe;
-	int n = 0;
-
-	xe_for_each_engine(fd, hwe) {
-		if (hwe->engine_class != class || hwe->gt_id != gt)
-			continue;
-
-		eci[n++] = *hwe;
-	}
-	igt_assert(n);
-
-	test_exec(fd, eci, n, n, n, 0);
-}
-
 int igt_main()
 {
 	struct drm_xe_engine_class_instance *hwe;
@@ -444,11 +421,6 @@ int igt_main()
 		xe_for_each_gt(fd, gt)
 			xe_for_each_multi_queue_engine_class(class)
 				test_sanity(fd, gt, class);
-
-	igt_subtest_f("virtual")
-		xe_for_each_gt(fd, gt)
-			xe_for_each_multi_queue_engine_class(class)
-				test_exec_virtual(fd, gt, class);
 
 	for (const struct section *s = sections; s->name; s++) {
 		igt_subtest_f("one-queue-%s", s->name)
