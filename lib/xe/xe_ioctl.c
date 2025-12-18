@@ -503,33 +503,6 @@ uint32_t xe_exec_queue_create_class(int fd, uint32_t vm, uint16_t class)
 	return create.exec_queue_id;
 }
 
-int __xe_exec_queue_set_property(int fd, uint32_t exec_queue, uint32_t property,
-				 uint64_t value)
-{
-	struct drm_xe_exec_queue_set_property xe_priority = {
-		.property = property,
-		.exec_queue_id = exec_queue,
-		.value  = value,
-	};
-	int err;
-
-	err = igt_ioctl(fd, DRM_IOCTL_XE_EXEC_QUEUE_SET_PROPERTY, &xe_priority);
-	if (err) {
-		err = -errno;
-		igt_assume(err);
-		errno = 0;
-		return err;
-	}
-
-	return 0;
-}
-
-void xe_exec_queue_set_property(int fd, uint32_t exec_queue, uint32_t property,
-				uint64_t value)
-{
-	igt_assert_eq(__xe_exec_queue_set_property(fd, exec_queue, property, value), 0);
-}
-
 void xe_exec_queue_destroy(int fd, uint32_t exec_queue)
 {
 	struct drm_xe_exec_queue_destroy destroy = {
