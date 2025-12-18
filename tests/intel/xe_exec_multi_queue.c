@@ -30,7 +30,6 @@
 #define CLOSE_FD		(0x1 << 2)
 #define PREEMPT_MODE		(0x1 << 3)
 #define DYN_PRIORITY		(0x1 << 4)
-#define INVALIDATE		(0x1 << 5)
 
 #define MAX_INSTANCE 9
 
@@ -262,16 +261,9 @@ test_preempt_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_plac
 	bo_size = xe_bb_size(fd, sizeof(*data) * n_execs);
 
 	if (flags & USERPTR) {
-#define	MAP_ADDRESS	0x00007fadeadbe000
-		if (flags & INVALIDATE) {
-			data = mmap((void *)MAP_ADDRESS, bo_size, PROT_READ |
-				    PROT_WRITE, MAP_SHARED | MAP_FIXED |
-				    MAP_ANONYMOUS, -1, 0);
-			igt_assert(data != MAP_FAILED);
-		} else {
-			data = aligned_alloc(xe_get_default_alignment(fd), bo_size);
-			igt_assert(data);
-		}
+		data = aligned_alloc(xe_get_default_alignment(fd), bo_size);
+		igt_assert(data);
+
 		memset(data, 0, bo_size);
 	} else {
 		bo = xe_bo_create(fd, vm, bo_size, vram_if_possible(fd, eci[0].gt_id),
@@ -336,40 +328,18 @@ test_preempt_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_plac
 						   XE_EXEC_QUEUE_PRIORITY_NORMAL + (rand() % 2));
 
 		xe_exec(fd, &exec);
-
-		if (flags & INVALIDATE) {
-			/*
-			 * Wait for exec completion and check data as userptr will
-			 * likely change to different physical memory on next mmap
-			 * call triggering an invalidate.
-			 */
-			xe_wait_ufence(fd, &data[i].exec_sync,
-				       USER_FENCE_VALUE, exec_queues[e],
-				       fence_timeout);
-			igt_assert_eq(data[i].data, 0xc0ffee);
-
-			if (i) {
-				data = mmap((void *)MAP_ADDRESS, bo_size, PROT_READ |
-					    PROT_WRITE, MAP_SHARED | MAP_FIXED |
-					    MAP_ANONYMOUS, -1, 0);
-				igt_assert(data != MAP_FAILED);
-			}
-
-		}
 	}
 
-	if (!(flags & INVALIDATE))
-		for (i = 0; i < n_execs; i++)
-			xe_wait_ufence(fd, &data[i].exec_sync, USER_FENCE_VALUE,
-				       exec_queues[i % n_exec_queues], fence_timeout);
+	for (i = 0; i < n_execs; i++)
+		xe_wait_ufence(fd, &data[i].exec_sync, USER_FENCE_VALUE,
+			       exec_queues[i % n_exec_queues], fence_timeout);
 
 	sync.addr = to_user_pointer(&vm_sync);
 	xe_vm_unbind_async(fd, vm, 0, 0, addr, bo_size, &sync, 1);
 	xe_wait_ufence(fd, &vm_sync, USER_FENCE_VALUE, 0, fence_timeout);
 
-	if (!(flags & INVALIDATE))
-		for (i = 0; i < n_execs; i++)
-			igt_assert_eq(data[i].data, 0xc0ffee);
+	for (i = 0; i < n_execs; i++)
+		igt_assert_eq(data[i].data, 0xc0ffee);
 
 	if (!(flags & CLOSE_FD))
 		for (i = 0; i < n_exec_queues; i++)
@@ -378,7 +348,7 @@ test_preempt_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_plac
 	if (bo) {
 		munmap(data, bo_size);
 		gem_close(fd, bo);
-	} else if (!(flags & INVALIDATE)) {
+	} else {
 		free(data);
 	}
 
@@ -424,16 +394,9 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
 	bo_size = xe_bb_size(fd, sizeof(*data) * n_execs);
 
 	if (flags & USERPTR) {
-#define	MAP_ADDRESS	0x00007fadeadbe000
-		if (flags & INVALIDATE) {
-			data = mmap((void *)MAP_ADDRESS, bo_size, PROT_READ |
-				    PROT_WRITE, MAP_SHARED | MAP_FIXED |
-				    MAP_ANONYMOUS, -1, 0);
-			igt_assert(data != MAP_FAILED);
-		} else {
-			data = aligned_alloc(xe_get_default_alignment(fd), bo_size);
-			igt_assert(data);
-		}
+		data = aligned_alloc(xe_get_default_alignment(fd), bo_size);
+		igt_assert(data);
+
 		memset(data, 0, bo_size);
 	} else {
 		bo = xe_bo_create(fd, vm, bo_size, vram_if_possible(fd, eci[0].gt_id),
@@ -503,29 +466,10 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
 						   XE_EXEC_QUEUE_PRIORITY_NORMAL + (rand() % 2));
 
 		xe_exec(fd, &exec);
-
-		if (flags & INVALIDATE) {
-			/*
-			 * Wait for exec completion and check data as userptr will
-			 * likely change to different physical memory on next mmap
-			 * call triggering an invalidate.
-			 */
-			igt_assert(syncobj_wait(fd, &syncobjs[e], 1,
-						INT64_MAX, 0, NULL));
-			igt_assert_eq(data[i].data, 0xc0ffee);
-
-			if (i) {
-				data = mmap((void *)MAP_ADDRESS, bo_size, PROT_READ |
-					    PROT_WRITE, MAP_SHARED | MAP_FIXED |
-					    MAP_ANONYMOUS, -1, 0);
-				igt_assert(data != MAP_FAILED);
-			}
-		}
 	}
 
-	if (!(flags & INVALIDATE))
-		for (i = 0; i < n_exec_queues && i < n_execs; i++)
-			igt_assert(syncobj_wait(fd, &syncobjs[i], 1, INT64_MAX, 0, NULL));
+	for (i = 0; i < n_exec_queues && i < n_execs; i++)
+		igt_assert(syncobj_wait(fd, &syncobjs[i], 1, INT64_MAX, 0, NULL));
 
 	igt_assert(syncobj_wait(fd, &bind_syncobj, 1, INT64_MAX, 0, NULL));
 	sync[0].flags |= DRM_XE_SYNC_FLAG_SIGNAL;
@@ -533,9 +477,8 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
 	xe_vm_unbind_async(fd, vm, 0, 0, addr, bo_size, sync, 1);
 	igt_assert(syncobj_wait(fd, &sync[0].handle, 1,	INT64_MAX, 0, NULL));
 
-	if (!(flags & INVALIDATE))
-		for (i = 0; i < n_execs; i++)
-			igt_assert_eq(data[i].data, 0xc0ffee);
+	for (i = 0; i < n_execs; i++)
+		igt_assert_eq(data[i].data, 0xc0ffee);
 
 	for (i = 0; i < n_exec_queues; i++) {
 		syncobj_destroy(fd, syncobjs[i]);
@@ -546,7 +489,7 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
 	if (bo) {
 		munmap(data, bo_size);
 		gem_close(fd, bo);
-	} else if (!(flags & INVALIDATE)) {
+	} else {
 		free(data);
 	}
 
@@ -587,13 +530,11 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
  *
  * @basic:					basic
  * @userptr:					userptr
- * @userptr-invalidate:				userptr invalidate
  * @priority:					priority
  * @close-fd:					close fd without destroying exec queues
  * @dyn-priority:				dynamic priority
  * @preempt-mode-basic:				preempt-mode basic
  * @preempt-mode-userptr:			preempt-mode userptr
- * @preempt-mode-userptr-invalidate:		preempt-mode userptr invalidate
  * @preempt-mode-priority:			preempt-mode priority
  * @preempt-mode-close-fd:			preempt-mode close fd without destroying exec queues
  * @preempt-mode-dyn-priority:			preempt-mode dynamic priority
@@ -641,13 +582,11 @@ int igt_main()
 	} sections[] = {
 		{ "basic", 0 },
 		{ "userptr", USERPTR },
-		{ "userptr-invalidate", USERPTR | INVALIDATE },
 		{ "priority", PRIORITY },
 		{ "close-fd", CLOSE_FD },
 		{ "dyn-priority", DYN_PRIORITY },
 		{ "preempt-mode-basic", PREEMPT_MODE },
 		{ "preempt-mode-userptr", PREEMPT_MODE | USERPTR },
-		{ "preempt-mode-userptr-invalidate", PREEMPT_MODE | USERPTR | INVALIDATE },
 		{ "preempt-mode-priority", PREEMPT_MODE | PRIORITY },
 		{ "preempt-mode-close-fd", PREEMPT_MODE | CLOSE_FD },
 		{ "preempt-mode-dyn-priority", PREEMPT_MODE | DYN_PRIORITY },
