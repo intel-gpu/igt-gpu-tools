@@ -299,7 +299,6 @@ intel_xe_progs = [
 	'xe_exec_compute_mode',
 	'xe_exec_fault_mode',
 	'xe_exec_mix_modes',
-	'xe_exec_multi_queue',
 	'xe_exec_queue_property',
 	'xe_exec_reset',
 	'xe_exec_sip',
