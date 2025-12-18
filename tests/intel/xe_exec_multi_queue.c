@@ -18,15 +18,9 @@
 #include "xe/xe_ioctl.h"
 #include "xe/xe_query.h"
 
-#define XE_EXEC_QUEUE_PRIORITY_LOW	0
-#define XE_EXEC_QUEUE_PRIORITY_NORMAL	1
-#define XE_EXEC_QUEUE_PRIORITY_HIGH	2
-#define XE_EXEC_QUEUE_NUM_PRIORITIES	3
-
 #define MAX_N_EXEC_QUEUES	64
 
 #define USERPTR			(0x1 << 0)
-#define PRIORITY		(0x1 << 1)
 
 #define MAX_INSTANCE 9
 
@@ -42,15 +36,6 @@ __test_sanity(int fd, int gt, int class)
 		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
 		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP,
 		.value = DRM_XE_MULTI_GROUP_CREATE,
-	};
-	struct drm_xe_ext_set_property mq_priority = {
-		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_QUEUE_PRIORITY,
-	};
-	struct drm_xe_ext_set_property priority = {
-		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_PRIORITY,
-		.value = XE_EXEC_QUEUE_PRIORITY_NORMAL,
 	};
 	struct drm_xe_engine_class_instance vm_bind_eci = {
 		.engine_class = DRM_XE_ENGINE_CLASS_VM_BIND,
@@ -106,11 +91,6 @@ __test_sanity(int fd, int gt, int class)
 	multi_queue.base.next_extension = to_user_pointer(&multi_queue);
 	igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, 1, eci, ext, &val), -EINVAL);
 
-	/* Setting other queue properties are valid for Q0 */
-	multi_queue.base.next_extension = to_user_pointer(&priority);
-	exec_queues[0] = xe_exec_queue_create(fd, vm, eci, ext);
-	xe_exec_queue_destroy(fd, exec_queues[0]);
-
 	/* Adding queues to group after primary is destroyed is invalid */
 	multi_queue.base.next_extension = 0;
 	exec_queues[0] = xe_exec_queue_create(fd, vm, eci, ext);
@@ -139,11 +119,6 @@ __test_sanity(int fd, int gt, int class)
 	if (n > 1)
 		igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, n, eci, ext, &val), -EINVAL);
 
-	/* Setting properties (other than MULTI_QUEUE_PRIORITY) is invalid for secondary queues */
-	multi_queue.base.next_extension = to_user_pointer(&priority);
-	igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, 1, eci, ext, &val), -EINVAL);
-
-	multi_queue.base.next_extension = 0;
 	for (i = 1; i < MAX_N_EXEC_QUEUES; i++)
 		exec_queues[i] = xe_exec_queue_create(fd, vm, eci, ext);
 
@@ -173,37 +148,6 @@ __test_sanity(int fd, int gt, int class)
 		for (i = 0; i < MAX_N_EXEC_QUEUES; i++)
 			xe_exec_queue_destroy(fd, exec_queues[i]);
 	}
-
-	/* MQ priority is not valid for regular queues */
-	igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, 1, eci,
-					     to_user_pointer(&mq_priority), &val), -EINVAL);
-
-	/* MQ priority validation */
-	multi_queue.value = DRM_XE_MULTI_GROUP_CREATE;
-	multi_queue.base.next_extension = to_user_pointer(&mq_priority);
-	mq_priority.value = XE_EXEC_QUEUE_NUM_PRIORITIES;
-	igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, 1, eci, ext, &val), -EINVAL);
-
-	mq_priority.value = XE_EXEC_QUEUE_PRIORITY_HIGH;
-	exec_queues[0] = xe_exec_queue_create(fd, vm, eci, ext);
-	multi_queue.value = exec_queues[0];
-	exec_queues[1] = xe_exec_queue_create(fd, vm, eci, ext);
-	xe_exec_queue_destroy(fd, exec_queues[1]);
-	xe_exec_queue_destroy(fd, exec_queues[0]);
-
-	igt_fork(child, 1) {
-		igt_drop_root();
-
-		/* Tests MULTI_QUEUE_PRIORITY property by dropping root permissions */
-		multi_queue.value = DRM_XE_MULTI_GROUP_CREATE;
-		mq_priority.value = XE_EXEC_QUEUE_PRIORITY_HIGH;
-		exec_queues[0] = xe_exec_queue_create(fd, vm, eci, ext);
-		multi_queue.value = exec_queues[0];
-		exec_queues[1] = xe_exec_queue_create(fd, vm, eci, ext);
-		xe_exec_queue_destroy(fd, exec_queues[1]);
-		xe_exec_queue_destroy(fd, exec_queues[0]);
-	}
-	igt_waitchildren();
 
 	xe_vm_destroy(fd, vm);
 }
@@ -267,16 +211,7 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
 			.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
 			.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP,
 		};
-		struct drm_xe_ext_set_property mq_priority = {
-			.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-			.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_QUEUE_PRIORITY,
-		};
 		uint64_t ext = to_user_pointer(&multi_queue);
-
-		if (flags & PRIORITY) {
-			multi_queue.base.next_extension = to_user_pointer(&mq_priority);
-			mq_priority.value = XE_EXEC_QUEUE_PRIORITY_NORMAL + (rand() % 2);
-		}
 
 		multi_queue.value = i ? exec_queues[0] : DRM_XE_MULTI_GROUP_CREATE;
 		igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, num_placement, eci,
@@ -378,7 +313,6 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
  *
  * @basic:					basic
  * @userptr:					userptr
- * @priority:					priority
  */
 static void
 test_exec(int fd, struct drm_xe_engine_class_instance *eci, int num_placement,
@@ -396,7 +330,6 @@ int igt_main()
 	} sections[] = {
 		{ "basic", 0 },
 		{ "userptr", USERPTR },
-		{ "priority", PRIORITY },
 		{ NULL },
 	};
 	int fd, gt, class;
