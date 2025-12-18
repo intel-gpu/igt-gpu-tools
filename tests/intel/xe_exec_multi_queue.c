@@ -31,7 +31,6 @@
 #define PREEMPT_MODE		(0x1 << 3)
 #define DYN_PRIORITY		(0x1 << 4)
 #define INVALIDATE		(0x1 << 5)
-#define FAULT_MODE		(0x1 << 6)
 
 #define MAX_INSTANCE 9
 
@@ -259,12 +258,7 @@ test_preempt_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_plac
 		fd = drm_open_driver(DRIVER_XE);
 
 	igt_assert(n_exec_queues <= MAX_N_EXEC_QUEUES);
-	if (flags & FAULT_MODE)
-		vm = xe_vm_create(fd, DRM_XE_VM_CREATE_FLAG_LR_MODE |
-				  DRM_XE_VM_CREATE_FLAG_FAULT_MODE, 0);
-	else
-		vm = xe_vm_create(fd, DRM_XE_VM_CREATE_FLAG_LR_MODE, 0);
-
+	vm = xe_vm_create(fd, DRM_XE_VM_CREATE_FLAG_LR_MODE, 0);
 	bo_size = xe_bb_size(fd, sizeof(*data) * n_execs);
 
 	if (flags & USERPTR) {
@@ -603,12 +597,6 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
  * @preempt-mode-priority:			preempt-mode priority
  * @preempt-mode-close-fd:			preempt-mode close fd without destroying exec queues
  * @preempt-mode-dyn-priority:			preempt-mode dynamic priority
- * @preempt-mode-fault-basic:			preempt-mode-fault-mode basic
- * @preempt-mode-fault-userptr:			preempt-mode-fault-mode userptr
- * @preempt-mode-fault-userptr-invalidate:	preempt-mode-fault-mode userptr invalidate
- * @preempt-mode-fault-priority:		preempt-mode-fault-mode priority
- * @preempt-mode-fault-close-fd:		preempt-mode-fault-mode close fd
- * @preempt-mode-fault-dyn-priority:		preempt-mode-fault-mode dynamic priority
  */
 static void
 test_exec(int fd, struct drm_xe_engine_class_instance *eci, int num_placement,
@@ -663,13 +651,6 @@ int igt_main()
 		{ "preempt-mode-priority", PREEMPT_MODE | PRIORITY },
 		{ "preempt-mode-close-fd", PREEMPT_MODE | CLOSE_FD },
 		{ "preempt-mode-dyn-priority", PREEMPT_MODE | DYN_PRIORITY },
-		{ "preempt-mode-fault-basic", PREEMPT_MODE | FAULT_MODE },
-		{ "preempt-mode-fault-userptr", PREEMPT_MODE | FAULT_MODE | USERPTR },
-		{ "preempt-mode-fault-userptr-invalidate", PREEMPT_MODE | FAULT_MODE |
-			USERPTR | INVALIDATE },
-		{ "preempt-mode-fault-priority", PREEMPT_MODE | FAULT_MODE | PRIORITY },
-		{ "preempt-mode-fault-close-fd", PREEMPT_MODE | FAULT_MODE | CLOSE_FD },
-		{ "preempt-mode-fault-dyn-priority", PREEMPT_MODE | FAULT_MODE | DYN_PRIORITY },
 		{ NULL },
 	};
 	int fd, gt, class;
