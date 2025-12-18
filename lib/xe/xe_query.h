@@ -94,13 +94,6 @@ struct xe_device {
 	for (uint64_t igt_unique(__i) = 0; igt_unique(__i) < igt_fls(__memreg); igt_unique(__i)++) \
 		for_if(__r = (__memreg & (1ull << igt_unique(__i))))
 
-#define xe_for_each_multi_queue_engine(__fd, __hwe)	\
-	xe_for_each_engine(__fd, __hwe)			\
-		for_if(xe_engine_class_supports_multi_queue((__hwe)->engine_class))
-#define xe_for_each_multi_queue_engine_class(__class)			\
-	xe_for_each_engine_class(__class)				\
-		for_if(xe_engine_class_supports_multi_queue(__class))
-
 #define XE_IS_CLASS_SYSMEM(__region) ((__region)->mem_class == DRM_XE_MEM_REGION_CLASS_SYSMEM)
 #define XE_IS_CLASS_VRAM(__region) ((__region)->mem_class == DRM_XE_MEM_REGION_CLASS_VRAM)
 
@@ -144,7 +137,6 @@ uint32_t xe_get_default_alignment(int fd);
 uint32_t xe_va_bits(int fd);
 uint16_t xe_dev_id(int fd);
 int xe_supports_faults(int fd);
-bool xe_engine_class_supports_multi_queue(uint32_t engine_class);
 const char *xe_engine_class_string(uint32_t engine_class);
 const char *xe_engine_class_short_string(uint32_t engine_class);
 bool xe_has_engine_class(int fd, uint16_t engine_class);

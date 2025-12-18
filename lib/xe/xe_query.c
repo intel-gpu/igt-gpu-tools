@@ -134,28 +134,6 @@ static uint32_t __mem_default_alignment(struct drm_xe_query_mem_regions *mem_reg
 }
 
 /**
- * xe_engine_class_supports_multi_queue:
- * @engine_class: engine class
- *
- * Returns true if multi queue supported by engine class or false.
- */
-bool xe_engine_class_supports_multi_queue(uint32_t engine_class)
-{
-	switch (engine_class) {
-		case DRM_XE_ENGINE_CLASS_COPY:
-		case DRM_XE_ENGINE_CLASS_COMPUTE:
-			return true;
-		case DRM_XE_ENGINE_CLASS_RENDER:
-		case DRM_XE_ENGINE_CLASS_VIDEO_DECODE:
-		case DRM_XE_ENGINE_CLASS_VIDEO_ENHANCE:
-			return false;
-		default:
-			igt_warn("Engine class 0x%x unknown\n", engine_class);
-			return false;
-	}
-}
-
-/**
  * xe_engine_class_string:
  * @engine_class: engine class
  *
