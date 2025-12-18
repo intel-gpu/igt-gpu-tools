@@ -58,7 +58,6 @@ void xe_spin_init(struct xe_spin *spin, struct xe_spin_opts *opts)
 
 	spin->start = 0;
 	spin->end = 0xffffffff;
-	spin->wait_cond = 0;
 	spin->ticks_delta = 0;
 
 	if (opts->ctx_ticks) {
@@ -175,24 +174,6 @@ void xe_spin_init(struct xe_spin *spin, struct xe_spin_opts *opts)
 					   opts->mem_copy->dst->mocs_index;
 	}
 
-	/*
-	 * Insert a MI_SEMAPHORE_WAIT_CMD instruction with condition controlled
-	 * by the user which acts as a queue switch point in multi queue mode.
-	 */
-	if (opts->multi_queue_switch) {
-		uint64_t wait_addr = opts->addr + offsetof(struct xe_spin, wait_cond);
-
-		spin->batch[b++] = MI_SEMAPHORE_WAIT_CMD |
-				MI_SEMAPHORE_POLL |
-				MI_SEMAPHORE_QUEUE_SWITCH_MODE |
-				MI_SEMAPHORE_SAD_EQ_SDD |
-				3;
-		spin->batch[b++] = 0;
-		spin->batch[b++] = wait_addr;
-		spin->batch[b++] = wait_addr >> 32;
-		spin->batch[b++] = 0;
-	}
-
 	spin->batch[b++] = MI_COND_BATCH_BUFFER_END | MI_DO_COMPARE | 2;
 	spin->batch[b++] = 0;
 	spin->batch[b++] = end_addr;
@@ -231,28 +212,6 @@ void xe_spin_wait_started(struct xe_spin *spin)
 void xe_spin_end(struct xe_spin *spin)
 {
 	WRITE_ONCE(spin->end, 0);
-}
-
-/**
- * xe_spin_preempt_wait:
- * @spin: pointer to spinner mapped bo
- *
- * Make the spinner wait on the preemption semaphore.
- */
-void xe_spin_preempt_wait(struct xe_spin *spin)
-{
-	WRITE_ONCE(spin->wait_cond, 1);
-}
-
-/**
- * xe_spin_preempt_nowait:
- * @spin: pointer to spinner mapped bo
- *
- * Make the spinner do not wait on the preemption semaphore.
- */
-void xe_spin_preempt_nowait(struct xe_spin *spin)
-{
-	WRITE_ONCE(spin->wait_cond, 0);
 }
 
 /**
