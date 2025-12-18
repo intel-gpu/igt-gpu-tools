@@ -28,7 +28,6 @@
 #define USERPTR			(0x1 << 0)
 #define PRIORITY		(0x1 << 1)
 #define CLOSE_FD		(0x1 << 2)
-#define PREEMPT_MODE		(0x1 << 3)
 
 #define MAX_INSTANCE 9
 
@@ -37,7 +36,7 @@
 #define BASE_ADDRESS	0x1a0000
 
 static void
-__test_sanity(int fd, int gt, int class, bool preempt_mode)
+__test_sanity(int fd, int gt, int class)
 {
 	uint32_t exec_queues[MAX_N_EXEC_QUEUES];
 	struct drm_xe_ext_set_property multi_queue = {
@@ -73,7 +72,7 @@ __test_sanity(int fd, int gt, int class, bool preempt_mode)
 	if (!n)
 		return;
 
-	vm = xe_vm_create(fd, preempt_mode ? DRM_XE_VM_CREATE_FLAG_LR_MODE : 0, 0);
+	vm = xe_vm_create(fd, 0, 0);
 
 	/* Invalid flags */
 	while (!invalid_flag)
@@ -133,7 +132,7 @@ __test_sanity(int fd, int gt, int class, bool preempt_mode)
 
 	/* Queues in a queue group must share the same address space (vm) */
 	multi_queue.value = exec_queues[0];
-	vm2 = xe_vm_create(fd, preempt_mode ? DRM_XE_VM_CREATE_FLAG_LR_MODE : 0, 0);
+	vm2 = xe_vm_create(fd, 0, 0);
 	igt_assert_eq(__xe_exec_queue_create(fd, vm2, 1, 1, eci, ext, &val), -EINVAL);
 	xe_vm_destroy(fd, vm2);
 
@@ -218,137 +217,7 @@ __test_sanity(int fd, int gt, int class, bool preempt_mode)
 static void
 test_sanity(int fd, int gt, int class)
 {
-	__test_sanity(fd, gt, class, false);
-	__test_sanity(fd, gt, class, true);
-}
-
-static void
-test_preempt_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_placement,
-		  int n_exec_queues, int n_execs, unsigned int flags)
-{
-#define USER_FENCE_VALUE	0xdeadbeefdeadbeefull
-	struct drm_xe_sync sync = {
-		.type = DRM_XE_SYNC_TYPE_USER_FENCE,
-		.flags = DRM_XE_SYNC_FLAG_SIGNAL,
-		.timeline_value = USER_FENCE_VALUE,
-	};
-	struct drm_xe_exec exec = {
-		.num_batch_buffer = 1,
-		.num_syncs = 1,
-		.syncs = to_user_pointer(&sync),
-	};
-	uint32_t vm;
-	uint64_t addr = BASE_ADDRESS;
-	uint32_t exec_queues[MAX_N_EXEC_QUEUES];
-	int64_t fence_timeout = NSEC_PER_SEC;
-	uint64_t vm_sync = 0;
-	size_t bo_size;
-	uint32_t bo = 0;
-	struct {
-		uint32_t batch[16];
-		uint64_t pad;
-		uint64_t exec_sync;
-		uint32_t data;
-	} *data;
-	int i, b;
-
-	if (flags & CLOSE_FD)
-		fd = drm_open_driver(DRIVER_XE);
-
-	igt_assert(n_exec_queues <= MAX_N_EXEC_QUEUES);
-	vm = xe_vm_create(fd, DRM_XE_VM_CREATE_FLAG_LR_MODE, 0);
-	bo_size = xe_bb_size(fd, sizeof(*data) * n_execs);
-
-	if (flags & USERPTR) {
-		data = aligned_alloc(xe_get_default_alignment(fd), bo_size);
-		igt_assert(data);
-
-		memset(data, 0, bo_size);
-	} else {
-		bo = xe_bo_create(fd, vm, bo_size, vram_if_possible(fd, eci[0].gt_id),
-				  DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM);
-		data = xe_bo_map(fd, bo, bo_size);
-	}
-
-	for (i = 0; i < n_exec_queues; i++) {
-		struct drm_xe_ext_set_property multi_queue = {
-			.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-			.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP,
-		};
-		struct drm_xe_ext_set_property mq_priority = {
-			.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-			.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_QUEUE_PRIORITY,
-		};
-		uint64_t ext = to_user_pointer(&multi_queue);
-
-		if (flags & PRIORITY) {
-			multi_queue.base.next_extension = to_user_pointer(&mq_priority);
-			mq_priority.value = XE_EXEC_QUEUE_PRIORITY_NORMAL + (rand() % 2);
-		}
-
-		multi_queue.value = i ? exec_queues[0] : DRM_XE_MULTI_GROUP_CREATE;
-		igt_assert_eq(__xe_exec_queue_create(fd, vm, 1, num_placement, eci,
-						     ext, &exec_queues[i]), 0);
-	};
-
-	sync.addr = to_user_pointer(&vm_sync);
-	if (bo)
-		xe_vm_bind_async(fd, vm, 0, bo, 0, addr, bo_size, &sync, 1);
-	else
-		xe_vm_bind_userptr_async(fd, vm, 0, to_user_pointer(data),
-					 addr, bo_size, &sync, 1);
-
-	xe_wait_ufence(fd, &vm_sync, USER_FENCE_VALUE, 0, fence_timeout);
-	vm_sync = 0;
-
-	for (i = 0; i < n_execs; i++) {
-		uint64_t batch_offset = (char *)&data[i].batch - (char *)data;
-		uint64_t batch_addr = addr + batch_offset;
-		uint64_t sdi_offset = (char *)&data[i].data - (char *)data;
-		uint64_t sdi_addr = addr + sdi_offset;
-		int e = i % n_exec_queues;
-
-		b = 0;
-		data[i].batch[b++] = MI_STORE_DWORD_IMM_GEN4;
-		data[i].batch[b++] = sdi_addr;
-		data[i].batch[b++] = sdi_addr >> 32;
-		data[i].batch[b++] = 0xc0ffee;
-		data[i].batch[b++] = MI_BATCH_BUFFER_END;
-		igt_assert(b <= ARRAY_SIZE(data[i].batch));
-
-		sync.addr = addr + (char *)&data[i].exec_sync - (char *)data;
-
-		exec.exec_queue_id = exec_queues[e];
-		exec.address = batch_addr;
-		xe_exec(fd, &exec);
-	}
-
-	for (i = 0; i < n_execs; i++)
-		xe_wait_ufence(fd, &data[i].exec_sync, USER_FENCE_VALUE,
-			       exec_queues[i % n_exec_queues], fence_timeout);
-
-	sync.addr = to_user_pointer(&vm_sync);
-	xe_vm_unbind_async(fd, vm, 0, 0, addr, bo_size, &sync, 1);
-	xe_wait_ufence(fd, &vm_sync, USER_FENCE_VALUE, 0, fence_timeout);
-
-	for (i = 0; i < n_execs; i++)
-		igt_assert_eq(data[i].data, 0xc0ffee);
-
-	if (!(flags & CLOSE_FD))
-		for (i = 0; i < n_exec_queues; i++)
-			xe_exec_queue_destroy(fd, exec_queues[i]);
-
-	if (bo) {
-		munmap(data, bo_size);
-		gem_close(fd, bo);
-	} else {
-		free(data);
-	}
-
-	if (!(flags & CLOSE_FD))
-		xe_vm_destroy(fd, vm);
-	else
-		drm_close_driver(fd);
+	__test_sanity(fd, gt, class);
 }
 
 static void
@@ -520,19 +389,12 @@ test_legacy_mode(int fd, struct drm_xe_engine_class_instance *eci, int num_place
  * @userptr:					userptr
  * @priority:					priority
  * @close-fd:					close fd without destroying exec queues
- * @preempt-mode-basic:				preempt-mode basic
- * @preempt-mode-userptr:			preempt-mode userptr
- * @preempt-mode-priority:			preempt-mode priority
- * @preempt-mode-close-fd:			preempt-mode close fd without destroying exec queues
  */
 static void
 test_exec(int fd, struct drm_xe_engine_class_instance *eci, int num_placement,
 	  int n_exec_queues, int n_execs, unsigned int flags)
 {
-	if (flags & PREEMPT_MODE)
-		test_preempt_mode(fd, eci, num_placement, n_exec_queues, n_execs, flags);
-	else
-		test_legacy_mode(fd, eci, num_placement, n_exec_queues, n_execs, flags);
+	test_legacy_mode(fd, eci, num_placement, n_exec_queues, n_execs, flags);
 }
 
 /**
@@ -556,7 +418,6 @@ test_exec_virtual(int fd, int gt, int class)
 	igt_assert(n);
 
 	test_exec(fd, eci, n, n, n, 0);
-	test_exec(fd, eci, n, n, n, PREEMPT_MODE);
 }
 
 int igt_main()
@@ -570,10 +431,6 @@ int igt_main()
 		{ "userptr", USERPTR },
 		{ "priority", PRIORITY },
 		{ "close-fd", CLOSE_FD },
-		{ "preempt-mode-basic", PREEMPT_MODE },
-		{ "preempt-mode-userptr", PREEMPT_MODE | USERPTR },
-		{ "preempt-mode-priority", PREEMPT_MODE | PRIORITY },
-		{ "preempt-mode-close-fd", PREEMPT_MODE | CLOSE_FD },
 		{ NULL },
 	};
 	int fd, gt, class;
