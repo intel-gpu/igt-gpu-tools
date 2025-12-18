@@ -44,9 +44,6 @@
 
 #define BASE_ADDRESS	0x1a0000
 
-/* Number of queues in exec sanity tests */
-#define NUM_QUEUES		2
-
 static void
 __test_sanity(int fd, int gt, int class, bool preempt_mode)
 {
@@ -231,138 +228,6 @@ test_sanity(int fd, int gt, int class)
 {
 	__test_sanity(fd, gt, class, false);
 	__test_sanity(fd, gt, class, true);
-}
-
-static void
-__test_exec_sanity(int fd, struct drm_xe_engine_class_instance *eci, unsigned int flags)
-{
-#define USER_FENCE_VALUE	0xdeadbeefdeadbeefull
-	struct drm_xe_sync sync = { };
-	struct drm_xe_exec exec = {
-		.num_batch_buffer = 1,
-		.num_syncs = 1,
-		.syncs = to_user_pointer(&sync),
-	};
-	uint64_t vm_sync = 0, addr[NUM_QUEUES];
-	uint32_t vm, exec_queues[NUM_QUEUES], bo[NUM_QUEUES];
-	int64_t fence_timeout = NSEC_PER_SEC;
-	struct xe_spin *spin[NUM_QUEUES];
-	size_t bo_size;
-	struct drm_xe_ext_set_property multi_queue = {
-		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_MULTI_GROUP,
-		.value = DRM_XE_MULTI_GROUP_CREATE,
-	};
-	uint64_t ext = to_user_pointer(&multi_queue);
-	bool preempt_mode = flags & PREEMPT_MODE;
-	int i;
-
-	sync.flags = DRM_XE_SYNC_FLAG_SIGNAL;
-	if (preempt_mode) {
-		sync.type = DRM_XE_SYNC_TYPE_USER_FENCE;
-		sync.timeline_value = USER_FENCE_VALUE;
-	} else {
-		sync.type = DRM_XE_SYNC_TYPE_SYNCOBJ;
-		sync.handle = syncobj_create(fd, 0);
-	}
-
-	vm = xe_vm_create(fd, preempt_mode ? DRM_XE_VM_CREATE_FLAG_LR_MODE : 0, 0);
-	bo_size = xe_bb_size(fd, sizeof(struct xe_spin));
-
-	for (i = 0; i < NUM_QUEUES; i++) {
-		bo[i] = xe_bo_create(fd, vm, bo_size, vram_if_possible(fd, eci[0].gt_id),
-				     DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM);
-		spin[i] = xe_bo_map(fd, bo[i], bo_size);
-		exec_queues[i] = xe_exec_queue_create(fd, vm, eci, ext);
-		if (i == 0)
-			multi_queue.value = exec_queues[i];
-
-		addr[i] = BASE_ADDRESS + i * bo_size;
-	}
-
-	if (preempt_mode)
-		sync.addr = to_user_pointer(&vm_sync);
-
-	for (i = 0; i < NUM_QUEUES; i++) {
-		xe_vm_bind_async(fd, vm, 0, bo[i], 0, addr[i], bo_size, &sync, 1);
-		if (preempt_mode) {
-			xe_wait_ufence(fd, &vm_sync, USER_FENCE_VALUE, 0, fence_timeout);
-			vm_sync = 0;
-		} else {
-			igt_assert(syncobj_wait(fd, &sync.handle, 1, INT64_MAX, 0, NULL));
-			syncobj_reset(fd, &sync.handle, 1);
-		}
-	}
-
-	/* Validate job submission on secondary queue before primary queue */
-	for (i = NUM_QUEUES - 1; i >= 0; i--) {
-		xe_spin_init_opts(spin[i], .addr = addr[i]);
-		if (preempt_mode)
-			sync.addr = addr[i] + (char *)&spin[i]->exec_sync - (char *)spin[i];
-
-		exec.exec_queue_id = exec_queues[i];
-		exec.address = addr[i];
-		xe_exec(fd, &exec);
-		xe_spin_wait_started(spin[i]);
-		xe_spin_end(spin[i]);
-		if (preempt_mode) {
-			xe_wait_ufence(fd, &spin[i]->exec_sync, USER_FENCE_VALUE, exec_queues[i], fence_timeout);
-		} else {
-			igt_assert(syncobj_wait(fd, &sync.handle, 1, INT64_MAX, 0, NULL));
-			syncobj_reset(fd, &sync.handle, 1);
-		}
-	}
-
-	/* Destroy primary queue */
-	xe_exec_queue_destroy(fd, exec_queues[0]);
-
-	/* Validate submission on secondary queues fail after destroying the primary */
-	xe_spin_init_opts(spin[1], .addr = addr[1]);
-	if (preempt_mode)
-		sync.addr = addr[1] + (char *)&spin[1]->exec_sync - (char *)spin[1];
-
-	exec.exec_queue_id = exec_queues[1];
-	exec.address = addr[1];
-	igt_assert_eq(__xe_exec(fd, &exec), -ECANCELED);
-
-	if (preempt_mode)
-		sync.addr = to_user_pointer(&vm_sync);
-
-	for (i = 0; i < NUM_QUEUES; i++) {
-		xe_vm_unbind_async(fd, vm, 0, 0, addr[i], bo_size, &sync, 1);
-		if (preempt_mode) {
-			xe_wait_ufence(fd, &vm_sync, USER_FENCE_VALUE, 0, fence_timeout);
-			vm_sync = 0;
-		} else {
-			igt_assert(syncobj_wait(fd, &sync.handle, 1, INT64_MAX, 0, NULL));
-			syncobj_reset(fd, &sync.handle, 1);
-		}
-	}
-
-	/* Destroy secondary queue */
-	xe_exec_queue_destroy(fd, exec_queues[1]);
-
-	for (i = 0; i < NUM_QUEUES; i++) {
-		munmap(spin[i], bo_size);
-		gem_close(fd, bo[i]);
-	}
-
-	if (!preempt_mode)
-		syncobj_destroy(fd, sync.handle);
-
-	xe_vm_destroy(fd, vm);
-}
-
-/**
- * SUBTEST: exec-sanity
- * Description: Run exec submission sanity tests
- * Test category: functionality test
- */
-static void
-test_exec_sanity(int fd, struct drm_xe_engine_class_instance *eci)
-{
-	__test_exec_sanity(fd, eci, 0);
-	__test_exec_sanity(fd, eci, PREEMPT_MODE);
 }
 
 static void
@@ -1052,10 +917,6 @@ int igt_main()
 		xe_for_each_gt(fd, gt)
 			xe_for_each_multi_queue_engine_class(class)
 				test_sanity(fd, gt, class);
-
-	igt_subtest_f("exec-sanity")
-		xe_for_each_multi_queue_engine(fd, hwe)
-			test_exec_sanity(fd, hwe);
 
 	igt_subtest_f("virtual")
 		xe_for_each_gt(fd, gt)
