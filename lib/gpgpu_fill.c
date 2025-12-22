@@ -458,8 +458,7 @@ void xehp_gpgpu_fillfunc(int fd,
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
 
 	kernel = __xehp_gpgpu_kernel(fd, buf);
-	xehp_fill_interface_descriptor(ibb, buf, kernel->instr,
-				       kernel->size * 4, &idd);
+	xehp_fill_interface_descriptor(ibb, buf, kernel, &idd);
 	gpgpu_shader_destroy(kernel);
 
 	intel_bb_ptr_set(ibb, 0);
@@ -498,8 +497,7 @@ void xe3p_gpgpu_fillfunc(int fd,
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
 
 	kernel = __xe3p_gpgpu_kernel(fd);
-	xe3p_fill_interface_descriptor(ibb, buf, kernel->instr,
-				       kernel->size * 4, &idd);
+	xe3p_fill_interface_descriptor(ibb, kernel, &idd);
 	gpgpu_shader_destroy(kernel);
 
 	intel_bb_ptr_set(ibb, 0);
