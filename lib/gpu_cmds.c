@@ -22,6 +22,7 @@
  *
  */
 
+#include "gpgpu_shader.h"
 #include "gpu_cmds.h"
 #include "intel_mocs.h"
 #include "xe/xe_util.h"
@@ -894,20 +895,16 @@ void xelp_emit_vfe_state(struct intel_bb *ibb, uint32_t threads,
 			      curbe_size, legacy_mode);
 }
 
-/*
- * XEHP
- */
 void
 xehp_fill_interface_descriptor(struct intel_bb *ibb,
 			       struct intel_buf *dst,
-			       const uint32_t kernel[][4],
-			       size_t size,
+			       const struct gpgpu_shader *shdr,
 			       struct xehp_interface_descriptor_data *idd)
 {
 	uint32_t binding_table_offset, kernel_offset;
 
 	binding_table_offset = fill_binding_table(ibb, dst);
-	kernel_offset = gen7_fill_kernel(ibb, kernel, size);
+	kernel_offset = gen7_fill_kernel(ibb, shdr->instr, 4 * shdr->size);
 
 	memset(idd, 0, sizeof(*idd));
 	idd->desc0.kernel_start_pointer = (kernel_offset >> 6);
@@ -926,14 +923,12 @@ xehp_fill_interface_descriptor(struct intel_bb *ibb,
 
 void
 xe3p_fill_interface_descriptor(struct intel_bb *ibb,
-			       struct intel_buf *dst,
-			       const uint32_t kernel[][4],
-			       size_t size,
+			       const struct gpgpu_shader *shdr,
 			       struct xe3p_interface_descriptor_data *idd)
 {
 	uint64_t kernel_offset;
 
-	kernel_offset = gen7_fill_kernel(ibb, kernel, size);
+	kernel_offset = gen7_fill_kernel(ibb, shdr->instr, 4 * shdr->size);
 	kernel_offset += ibb->batch_offset;
 	kernel_offset = xe_canonical_va(ibb->fd, kernel_offset);
 
