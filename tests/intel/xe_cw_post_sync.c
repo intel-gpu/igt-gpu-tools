@@ -142,10 +142,8 @@ static void *thread1_fn(void *arg)
 
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
 
-	xe3p_fill_interface_descriptor(ibb, short_buf, shader1->instr,
-				       4 * shader1->size, &idd1);
-	xe3p_fill_interface_descriptor(ibb, poll_buf, shader2->instr,
-				       4 * shader2->size, &idd2);
+	xe3p_fill_interface_descriptor(ibb, shader1, &idd1);
+	xe3p_fill_interface_descriptor(ibb, shader2, &idd2);
 
 	intel_bb_ptr_set(ibb, 0);
 	intel_bb_out(ibb, GEN7_PIPELINE_SELECT | GEN9_PIPELINE_SELECTION_MASK |

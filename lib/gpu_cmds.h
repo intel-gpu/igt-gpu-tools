@@ -39,6 +39,8 @@
 #include "intel_bufops.h"
 #include <assert.h>
 
+struct gpgpu_shader;
+
 struct xe3p_cw2_interrupt_data {
 	uint32_t post_sync_op;
 	uint64_t post_sync_addr;
@@ -132,8 +134,7 @@ gen7_emit_media_objects(struct intel_bb *ibb,
 void
 xehp_fill_interface_descriptor(struct intel_bb *ibb,
 			       struct intel_buf *dst,
-			       const uint32_t kernel[][4],
-			       size_t size,
+			       const struct gpgpu_shader *shdr,
 			       struct xehp_interface_descriptor_data *idd);
 
 void
@@ -141,9 +142,7 @@ xehp_emit_state_compute_mode(struct intel_bb *ibb, bool vrt, uint32_t exceptions
 
 void
 xe3p_fill_interface_descriptor(struct intel_bb *ibb,
-			       struct intel_buf *dst,
-			       const uint32_t kernel[][4],
-			       size_t size,
+			       const struct gpgpu_shader *shdr,
 			       struct xe3p_interface_descriptor_data *idd);
 
 void
