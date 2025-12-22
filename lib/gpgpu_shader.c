@@ -168,8 +168,7 @@ __xehp_gpgpu_execfunc(struct intel_bb *ibb,
 
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
 
-	xehp_fill_interface_descriptor(ibb, target, shdr->instr,
-				       4 * shdr->size, &idd);
+	xehp_fill_interface_descriptor(ibb, target, shdr, &idd);
 	idd.desc2.illegal_opcode_exception_enable = shdr->illegal_opcode_exception_enable;
 	idd.desc5.num_threads_in_tg = shdr->num_threads_in_tg;
 
@@ -221,8 +220,7 @@ __xe3p_gpgpu_execfunc(struct intel_bb *ibb,
 
 	intel_bb_add_intel_buf(ibb, target, true);
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
-	xe3p_fill_interface_descriptor(ibb, target, shdr->instr,
-				       4 * shdr->size, &idd);
+	xe3p_fill_interface_descriptor(ibb, shdr, &idd);
 	idd.dw02.illegal_opcode_exception_enable = shdr->illegal_opcode_exception_enable;
 	if (sip && sip->size)
 		sip_offset = fill_sip(ibb, sip->instr, 4 * sip->size);
