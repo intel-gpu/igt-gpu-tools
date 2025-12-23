@@ -265,7 +265,7 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 	shader = gpgpu_shader_create(data->drm_fd);
 
 	if (shader->gfx_ver == 3000)
-		gpgpu_shader_set_vrt(shader, VRT_96);
+		shader->grfs_per_thread = 96;
 
 	shader->simd_size = SIMD_SIZE;
 
