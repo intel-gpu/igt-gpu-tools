@@ -172,9 +172,6 @@ __xehp_gpgpu_execfunc(struct intel_bb *ibb,
 	idd.desc2.illegal_opcode_exception_enable = shdr->illegal_opcode_exception_enable;
 	idd.desc5.num_threads_in_tg = shdr->num_threads_in_tg;
 
-	if (shdr->vrt != VRT_DISABLED)
-		idd.desc2.registers_per_thread = shdr->vrt;
-
 	if (sip && sip->size)
 		sip_offset = fill_sip(ibb, sip->instr, 4 * sip->size);
 	else
@@ -336,7 +333,6 @@ struct gpgpu_shader *gpgpu_shader_create(int fd)
 	shdr->large_grf_mode = false;
 	shdr->simd_size = 16;  /* Default SIMD size */
 	shdr->hw_local_id_generation = false;
-	shdr->vrt = VRT_DISABLED;
 	shdr->exceptions = 0xffff0000;
 	igt_assert(shdr->code);
 
@@ -373,19 +369,6 @@ void gpgpu_shader_dump(struct gpgpu_shader *shdr)
 		igt_info("0x%08x 0x%08x 0x%08x 0x%08x\n",
 			 shdr->instr[i][0], shdr->instr[i][1],
 			 shdr->instr[i][2], shdr->instr[i][3]);
-}
-
-/**
- * gpgpu_shader_set_vrt:
- * @shdr: shader to be modified
- * @vrt: one of accepted VRT modes
- *
- * Sets variable register per thread mode for given shader.
- */
-void gpgpu_shader_set_vrt(struct gpgpu_shader *shdr, enum gpgpu_shader_vrt_modes vrt)
-{
-	igt_assert(vrt == VRT_DISABLED || shdr->gfx_ver >= 3000);
-	shdr->vrt = vrt;
 }
 
 struct max_threads_config {
@@ -425,13 +408,13 @@ static uint32_t compute_max_threads_in_tg_xe2(bool large_grf_mode,
 }
 
 struct vrt_max_threads_config {
-	enum gpgpu_shader_vrt_modes register_size;
+	uint32_t register_size;
 	uint32_t simd_size;
 	bool hw_local_id_generation;
 	uint32_t max_threads;
 };
 
-static uint32_t compute_max_threads_in_tg_xe3(enum gpgpu_shader_vrt_modes register_size,
+static uint32_t compute_max_threads_in_tg_xe3(uint32_t register_size,
 					      uint32_t simd_size,
 					      bool hw_local_id_generation)
 {
@@ -439,42 +422,42 @@ static uint32_t compute_max_threads_in_tg_xe3(enum gpgpu_shader_vrt_modes regist
 	static const struct vrt_max_threads_config configs[] = {
 		/* register_size, simd_size, hw_local_id_gen, max_threads */
 		/* Reg-size <= 128: SIMD16 always allows 64 threads */
-		{ VRT_32,  16, false, 64 },
-		{ VRT_32,  16, true,  64 },
-		{ VRT_64,  16, false, 64 },
-		{ VRT_64,  16, true,  64 },
-		{ VRT_96,  16, false, 64 },
-		{ VRT_96,  16, true,  64 },
-		{ VRT_128, 16, false, 64 },
-		{ VRT_128, 16, true,  64 },
+		{ 32,  16, false, 64 },
+		{ 32,  16, true,  64 },
+		{ 64,  16, false, 64 },
+		{ 64,  16, true,  64 },
+		{ 96,  16, false, 64 },
+		{ 96,  16, true,  64 },
+		{ 128, 16, false, 64 },
+		{ 128, 16, true,  64 },
 		/* Reg-size <= 128: */
-		{ VRT_32,  32, false, 64 },
-		{ VRT_32,  32, true,  32 },
-		{ VRT_64,  32, false, 64 },
-		{ VRT_64,  32, true,  32 },
-		{ VRT_96,  32, false, 64 },
-		{ VRT_96,  32, true,  32 },
-		{ VRT_128, 32, false, 64 },
-		{ VRT_128, 32, true,  32 },
+		{ 32,  32, false, 64 },
+		{ 32,  32, true,  32 },
+		{ 64,  32, false, 64 },
+		{ 64,  32, true,  32 },
+		{ 96,  32, false, 64 },
+		{ 96,  32, true,  32 },
+		{ 128, 32, false, 64 },
+		{ 128, 32, true,  32 },
 		/* Reg-size 160 */
-		{ VRT_160, 16, false, 48 },
-		{ VRT_160, 16, true,  48 },
-		{ VRT_160, 32, false, 48 },
-		{ VRT_160, 32, true,  32 },
+		{ 160, 16, false, 48 },
+		{ 160, 16, true,  48 },
+		{ 160, 32, false, 48 },
+		{ 160, 32, true,  32 },
 		/* Reg-size 192 */
-		{ VRT_192, 16, false, 40 },
-		{ VRT_192, 16, true,  40 },
-		{ VRT_192, 32, false, 40 },
-		{ VRT_192, 32, true,  32 },
+		{ 192, 16, false, 40 },
+		{ 192, 16, true,  40 },
+		{ 192, 32, false, 40 },
+		{ 192, 32, true,  32 },
 		/* Reg-size 256 */
-		{ VRT_256, 16, false, 32 },
-		{ VRT_256, 16, true,  32 },
-		{ VRT_256, 32, false, 32 },
-		{ VRT_256, 32, true,  32 },
+		{ 256, 16, false, 32 },
+		{ 256, 16, true,  32 },
+		{ 256, 32, false, 32 },
+		{ 256, 32, true,  32 },
 	};
 
 	for (int i = 0; i < ARRAY_SIZE(configs); i++) {
-		if (configs[i].register_size == register_size &&
+		if (configs[i].register_size >= register_size &&
 		    configs[i].simd_size == simd_size &&
 		    configs[i].hw_local_id_generation == hw_local_id_generation)
 			return configs[i].max_threads;
@@ -496,8 +479,6 @@ static uint32_t compute_max_threads_in_tg_xe3(enum gpgpu_shader_vrt_modes regist
  */
 uint32_t gpgpu_shader__get_max_threads_in_tg(struct gpgpu_shader *shdr)
 {
-	enum gpgpu_shader_vrt_modes register_size = shdr->vrt;
-
 	/* Not implemented for Xe platforms  */
 	if (shdr->gfx_ver < 2000)
 		return 1;
@@ -509,12 +490,7 @@ uint32_t gpgpu_shader__get_max_threads_in_tg(struct gpgpu_shader *shdr)
 						     shdr->hw_local_id_generation);
 	}
 
-	/* Xe3 platforms */
-	if (shdr->vrt == VRT_DISABLED) {
-		/* BSpec: 60258 */
-		register_size = shdr->large_grf_mode ? VRT_256 : VRT_128;
-	}
-	return compute_max_threads_in_tg_xe3(register_size, shdr->simd_size,
+	return compute_max_threads_in_tg_xe3(shdr->grfs_per_thread, shdr->simd_size,
 					     shdr->hw_local_id_generation);
 }
 
