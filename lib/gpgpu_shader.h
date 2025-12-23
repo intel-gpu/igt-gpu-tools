@@ -13,17 +13,6 @@
 struct intel_bb;
 struct intel_buf;
 
-enum gpgpu_shader_vrt_modes {
-	VRT_32 = 0x0,
-	VRT_64 = 0x1,
-	VRT_96 = 0x2,
-	VRT_128 = 0x3,
-	VRT_160 = 0x4,
-	VRT_192 = 0x5,
-	VRT_256 = 0x7,
-	VRT_DISABLED,
-};
-
 struct gpgpu_shader {
 	uint32_t gfx_ver;
 	uint32_t size;
@@ -39,7 +28,8 @@ struct gpgpu_shader {
 	bool large_grf_mode;
 	uint32_t simd_size;
 	bool hw_local_id_generation;
-	enum gpgpu_shader_vrt_modes vrt;
+	int grfs_per_thread;
+	int slm_size;
 };
 
 struct iga64_template {
@@ -79,8 +69,6 @@ static inline uint32_t gpgpu_shader_last_instr(struct gpgpu_shader *shdr)
 {
 	return shdr->size / 4 - 1;
 }
-
-void gpgpu_shader_set_vrt(struct gpgpu_shader *shdr, enum gpgpu_shader_vrt_modes vrt);
 
 uint32_t gpgpu_shader__get_max_threads_in_tg(struct gpgpu_shader *shdr);
 

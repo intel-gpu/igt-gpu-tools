@@ -895,6 +895,38 @@ void xelp_emit_vfe_state(struct intel_bb *ibb, uint32_t threads,
 			      curbe_size, legacy_mode);
 }
 
+static int __lower_bound(int val, const int *arr, int size)
+{
+	for (int i = 0; i < size; ++i) {
+		if (arr[i] >= val)
+			return i;
+	}
+	return -1;
+}
+
+#define NOPAREN(...) __VA_ARGS__
+#define lookup_lower_bound(_key, _keys, _vals) ({				\
+	static const int keys[] = { NOPAREN _keys }, vals[] = { NOPAREN _vals };\
+	int size = ARRAY_SIZE(keys), i;						\
+										\
+	igt_assert_eq(size, ARRAY_SIZE(vals));					\
+	i = __lower_bound(_key, keys, size);					\
+	igt_assert_lte(0, i);							\
+	vals[i];								\
+})
+
+/* bspec: 56593 */
+static void idd_set_grfs_per_thread(struct xehp_interface_descriptor_data *idd,
+				    const struct gpgpu_shader *shdr)
+{
+	if (shdr->gfx_ver < 3000)
+		return;
+
+	idd->desc2.registers_per_thread = lookup_lower_bound(shdr->grfs_per_thread,
+		(32, 64, 96, 128, 160, 192, 256),
+		( 0,  1,  2,   3,   4,   5,   7));
+}
+
 void
 xehp_fill_interface_descriptor(struct intel_bb *ibb,
 			       struct intel_buf *dst,
@@ -911,6 +943,8 @@ xehp_fill_interface_descriptor(struct intel_bb *ibb,
 
 	idd->desc2.single_program_flow = 1;
 	idd->desc2.floating_point_mode = GEN8_FLOATING_POINT_IEEE_754;
+	if (shdr->grfs_per_thread)
+		idd_set_grfs_per_thread(idd, shdr);
 
 	idd->desc3.sampler_count = 0;      /* 0 samplers used */
 	idd->desc3.sampler_state_pointer = 0;
@@ -919,6 +953,25 @@ xehp_fill_interface_descriptor(struct intel_bb *ibb,
 	idd->desc4.binding_table_pointer = (binding_table_offset >> 5);
 
 	idd->desc5.num_threads_in_tg = 1;
+}
+
+/* bspec: 77779 */
+static void idd2_set_grfs_per_thread(struct xe3p_interface_descriptor_data *idd,
+				     const struct gpgpu_shader *shdr)
+{
+	idd->dw02.registers_per_thread = lookup_lower_bound(shdr->grfs_per_thread,
+		(16, 32, 48, 64, 80, 96, 128, 160, 256),
+		( 0,  1,  2,  3,  4,  5,   7,   9,  15));
+}
+
+/* bspec: 75546 */
+static void idd2_set_slm_size(struct xe3p_interface_descriptor_data *idd,
+		     const struct gpgpu_shader *shdr)
+{
+	int v = lookup_lower_bound(shdr->slm_size,
+		(0, 1, 2,  3, 4,  5,  6,  7, 8,  9, 10, 11, 12, 13, 14, 15, 16, 24, 32, 48, 64, 96, 128, 192, 256, 320, 384),
+		(0, 1, 2, 16, 3, 17, 18, 19, 4, 20, 21, 22, 23, 24, 25, 26,  5,  8,  6,  9,  7, 10,  11,  12,  13,  14,  15));
+	idd->dw05.shared_local_memory_size = v;
 }
 
 void
@@ -942,11 +995,17 @@ xe3p_fill_interface_descriptor(struct intel_bb *ibb,
 	idd->dw02.single_program_flow = 1;
 	idd->dw02.floating_point_mode = GEN8_FLOATING_POINT_IEEE_754;
 
+	if (shdr->grfs_per_thread)
+		idd2_set_grfs_per_thread(idd, shdr);
+
 	/*
 	* For testing purposes, use only one thread per thread group.
 	* This makes it possible to identify threads by thread group id.
 	*/
 	idd->dw05.number_of_threads_in_gpgpu_thread_group = 1;
+
+	if (shdr->slm_size)
+		idd2_set_slm_size(idd, shdr);
 }
 
 static uint32_t
@@ -1024,12 +1083,18 @@ xehp_emit_cfe_state(struct intel_bb *ibb, uint32_t threads)
 
 void xehp_emit_state_compute_mode(struct intel_bb *ibb, struct gpgpu_shader *shdr)
 {
-	uint32_t dword_length = intel_graphics_ver(ibb->devid) >= IP_VER(20, 0);
+	static const uint32_t STATE_COMPUTE_MODE_DW1_ENABLE_VRT = REG_BIT(10);
+	uint32_t dword_length = shdr->gfx_ver >= 2000;
+	uint32_t dw1 = 0xffff0000;
 
 	intel_bb_out(ibb, XEHP_STATE_COMPUTE_MODE | dword_length);
-	intel_bb_out(ibb, (shdr->vrt != VRT_DISABLED)
-				? (0x10001 << 10) /* Enable variable number of threads */
-				: 0);
+	if (shdr->grfs_per_thread) {
+		if (shdr->gfx_ver >= 3000)
+			dw1 |= STATE_COMPUTE_MODE_DW1_ENABLE_VRT;
+		else
+			igt_assert_lte(shdr->grfs_per_thread, 128);
+	}
+	intel_bb_out(ibb, dw1);
 
 	if (dword_length)
 		intel_bb_out(ibb, shdr->exceptions);
