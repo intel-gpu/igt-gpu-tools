@@ -138,7 +138,7 @@ xehp_fill_interface_descriptor(struct intel_bb *ibb,
 			       struct xehp_interface_descriptor_data *idd);
 
 void
-xehp_emit_state_compute_mode(struct intel_bb *ibb, bool vrt, uint32_t exceptions);
+xehp_emit_state_compute_mode(struct intel_bb *ibb, struct gpgpu_shader *shdr);
 
 void
 xe3p_fill_interface_descriptor(struct intel_bb *ibb,
