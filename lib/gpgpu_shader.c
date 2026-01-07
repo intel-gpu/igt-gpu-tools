@@ -579,24 +579,20 @@ void gpgpu_shader__nop(struct gpgpu_shader *shdr)
  */
 void gpgpu_shader__eot(struct gpgpu_shader *shdr)
 {
-	if (shdr->vrt == VRT_96)
-		emit_iga64_code(shdr, eot_vrt, R"(
-(W)	mov (8|M0)               r80.0<1>:ud  r0.0<8;8,1>:ud
-(W)	send.gtwy (8|M0)         null r80 src1_null     0 0x02000000 {EOT}
-		)");
-	else
-		emit_iga64_code(shdr, eot, R"(
-(W)	mov (8|M0)               r112.0<1>:ud  r0.0<8;8,1>:ud
-#if GFX_VER < 1250
-(W)	send.ts (16|M0)          null r112 null 0x10000000 0x02000010 {EOT,@1}
-
-#elif GFX_VER <= 3000
-(W)	send.gtwy (8|M0)         null r112 src1_null     0 0x02000000 {EOT}
-
+	emit_iga64_code(shdr, eot, R"(
+#if GFX_VER >= 3500
+(W)	sendg.gtwy (1)	null r0:1 null 0x0 {EOT}
+#elif GFX_VER >= 3000
+(W)	send.gtwy (8)	null r0 null 0 0x02000000 {EOT}
+#elif GFX_VER >= 1250
+// On xe1-2 platforms only r112+ registers can be used for EOT, bspec: 56815(xe2), 47443(xe)
+(W)	mov (8)		r112.0<1>:ud r0.0<8;8,1>:ud
+(W)	send.gtwy (8)	null r112 src1_null 0 0x02000000 {EOT}
 #else
-(W)	sendg.gtwy (1|M0)        null     r0:1  null:0  0x0 {EOT}
+(W)	mov (8)		r112.0<1>:ud r0.0<8;8,1>:ud
+(W)	send.ts (16)	null r112 null 0x10000000 0x02000010 {EOT,@1}
 #endif
-		)");
+	)");
 }
 
 /**
