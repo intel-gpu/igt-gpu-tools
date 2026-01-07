@@ -119,7 +119,7 @@ static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 		gpgpu_shader__write_on_exception(shader, SHADER_CANARY2, 1, 0,
 						 ILLEGAL_OPCODE_ENABLE, expected_cr0_bit);
 		emit_iga64_code(shader, xe_exec_sip_illegal, R"(
-		illegal
+	illegal
 		)");
 		/* SIP should clear exception bit, negative check */
 		gpgpu_shader__write_on_exception(shader, SHADER_CANARY2, 0, 0,
