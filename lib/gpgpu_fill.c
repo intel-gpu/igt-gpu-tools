@@ -467,7 +467,7 @@ void xehp_gpgpu_fillfunc(int fd,
 	intel_bb_out(ibb, GEN7_PIPELINE_SELECT | GEN9_PIPELINE_SELECTION_MASK |
 		  PIPELINE_SELECT_GPGPU);
 	xehp_emit_state_base_address(ibb);
-	xehp_emit_state_compute_mode(ibb, false, 0);
+	xehp_emit_state_compute_mode(ibb, kernel);
 	xehp_emit_state_binding_table_pool_alloc(ibb);
 	xehp_emit_cfe_state(ibb, THREADS);
 	xehp_emit_compute_walk(ibb, x, y, width, height, &idd, color);
@@ -506,7 +506,7 @@ void xe3p_gpgpu_fillfunc(int fd,
 	intel_bb_out(ibb, GEN7_PIPELINE_SELECT | GEN9_PIPELINE_SELECTION_MASK |
 		  PIPELINE_SELECT_GPGPU);
 	xe3p_emit_state_base_address(ibb);
-	xehp_emit_state_compute_mode(ibb, false, 0);
+	xehp_emit_state_compute_mode(ibb, kernel);
 	xe3p_emit_fill_compute_walk2(ibb, buf->width * buf->bpp / 8, buf->height,
 				     xe_canonical_va(fd, buf->addr.offset),
 				     x, y, width, height, &idd, color);
