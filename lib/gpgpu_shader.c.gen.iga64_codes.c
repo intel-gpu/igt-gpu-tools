@@ -3,7 +3,7 @@
 
 #include "gpgpu_shader.h"
 
-#define MD5_SUM_IGA64_ASMS efc0d7610534d44c992bb1f11d9b5f8f
+#define MD5_SUM_IGA64_ASMS 5086c4e7448c9ef285d22c1937f40e62
 
 struct iga64_template const iga64_code_read_a64_d32[] = {
 	{ .gfx_ver = 2000, .size = 40, .code = (const uint32_t []) {
@@ -860,9 +860,11 @@ struct iga64_template const iga64_code_jump[] = {
 };
 
 struct iga64_template const iga64_code_eot[] = {
-	{ .gfx_ver = 3500, .size = 8, .code = (const uint32_t []) {
-		0x800c0061, 0x70050220, 0x00460005, 0x00000000,
+	{ .gfx_ver = 3500, .size = 4, .code = (const uint32_t []) {
 		0x8000c033, 0x00000001, 0x3000000c, 0x00000000,
+	}},
+	{ .gfx_ver = 3000, .size = 4, .code = (const uint32_t []) {
+		0x800cc031, 0x00000004, 0x3000000c, 0x00000000,
 	}},
 	{ .gfx_ver = 2000, .size = 8, .code = (const uint32_t []) {
 		0x800c0061, 0x70050220, 0x00460005, 0x00000000,
@@ -885,31 +887,6 @@ struct iga64_template const iga64_code_eot[] = {
 	{ .gfx_ver = 0, .size = 8, .code = (const uint32_t []) {
 		0x80030061, 0x70050220, 0x00460005, 0x00000000,
 		0x80049031, 0x00000004, 0x7020700c, 0x10000000,
-	}}
-};
-
-struct iga64_template const iga64_code_eot_vrt[] = {
-	{ .gfx_ver = 2000, .size = 8, .code = (const uint32_t []) {
-		0x800c0061, 0x50050220, 0x00460005, 0x00000000,
-		0x800f2031, 0x00000004, 0x3000500c, 0x00000000,
-	}},
-	{ .gfx_ver = 1270, .size = 12, .code = (const uint32_t []) {
-		0x80030061, 0x50050220, 0x00460005, 0x00000000,
-		0x80001901, 0x00010000, 0x00000000, 0x00000000,
-		0x80034031, 0x00000004, 0x3000500c, 0x00000000,
-	}},
-	{ .gfx_ver = 1260, .size = 8, .code = (const uint32_t []) {
-		0x800c0061, 0x50050220, 0x00460005, 0x00000000,
-		0x800f2031, 0x00000004, 0x3000500c, 0x00000000,
-	}},
-	{ .gfx_ver = 1250, .size = 12, .code = (const uint32_t []) {
-		0x80030061, 0x50050220, 0x00460005, 0x00000000,
-		0x80001901, 0x00010000, 0x00000000, 0x00000000,
-		0x80034031, 0x00000004, 0x3000500c, 0x00000000,
-	}},
-	{ .gfx_ver = 0, .size = 8, .code = (const uint32_t []) {
-		0x80030061, 0x50050220, 0x00460005, 0x00000000,
-		0x80039031, 0x00000004, 0x3000500c, 0x00000000,
 	}}
 };
 
