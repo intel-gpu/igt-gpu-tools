@@ -63,8 +63,6 @@ struct user_execenv {
 	uint64_t input_addr;
 	/** @output_addr: override default address of the output array if provided */
 	uint64_t output_addr;
-	/** @loop_count: override default loop count if provided */
-	unsigned int loop_count;
 	/** @loop_kernel_duration: duration till kernel should execute in gpu **/
 	uint64_t loop_kernel_duration;
 };

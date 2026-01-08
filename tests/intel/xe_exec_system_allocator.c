@@ -2190,9 +2190,6 @@ test_compute(int fd, size_t size)
 	} *bo_sync;
 	uint32_t vm;
 	struct user_execenv env = {
-		/*
-		 * size is the number of bytes of the array, array_size is its number of elements.
-		 */
 		.array_size = size / sizeof(float),
 	};
 	float *compute_input;
