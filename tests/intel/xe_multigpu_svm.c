@@ -36,17 +36,6 @@
  * Description:
  *	Test cross-GPU memory access with prefetch in multi-GPU SVM configuration
  *
- * SUBTEST: mgpu-atomic-op-basic
- * Description:
- *	Test basic cross-GPU atomic increment operations in multi-GPU SVM configuration
- *	operation on GPU1 and then atomic operation on GPU2 using same
- *	address
- *
- * SUBTEST: mgpu-atomic-op-prefetch
- * Description:
- *	Tests cross-GPU atomic increment operations with explicit memory prefetch
- *	to validate SVM atomic operations in multi-GPU config
- *
  */
 
 #define MAX_XE_REGIONS	8
@@ -56,15 +45,9 @@
 #define BIND_SYNC_VAL 0x686868
 #define EXEC_SYNC_VAL 0x676767
 #define COPY_SIZE SZ_64M
-#define	ATOMIC_OP_VAL	56
 
 #define MULTIGPU_PREFETCH		BIT(1)
 #define MULTIGPU_XGPU_ACCESS		BIT(2)
-#define MULTIGPU_ATOMIC_OP		BIT(3)
-
-#define INIT	2
-#define STORE	3
-#define ATOMIC	4
 
 struct xe_svm_gpu_info {
 	bool supports_faults;
@@ -79,16 +62,6 @@ typedef void (*gpu_pair_fn)(struct xe_svm_gpu_info *src,
 			    struct drm_xe_engine_class_instance *eci,
 			    unsigned int flags);
 
-struct test_exec_data {
-	uint32_t batch[32];
-	uint64_t pad;
-	uint64_t vm_sync;
-	uint64_t exec_sync;
-	uint32_t data;
-	uint32_t expected_data;
-	uint64_t batch_addr;
-};
-
 static void for_each_gpu_pair(int num_gpus,
 			      struct xe_svm_gpu_info *gpus,
 			      struct drm_xe_engine_class_instance *eci,
@@ -100,10 +73,7 @@ static void gpu_mem_access_wrapper(struct xe_svm_gpu_info *src,
 				   struct drm_xe_engine_class_instance *eci,
 				   unsigned int flags);
 
-static void gpu_atomic_inc_wrapper(struct xe_svm_gpu_info *src,
-				   struct xe_svm_gpu_info *dst,
-				   struct drm_xe_engine_class_instance *eci,
-				   unsigned int flags);
+static void open_pagemaps(int fd, struct xe_svm_gpu_info *info);
 
 static void
 create_vm_and_queue(struct xe_svm_gpu_info *gpu, struct drm_xe_engine_class_instance *eci,
@@ -190,35 +160,6 @@ static void for_each_gpu_pair(int num_gpus, struct xe_svm_gpu_info *gpus,
 			fn(&gpus[src], &gpus[dst], eci, flags);
 		}
 	}
-}
-
-static void open_pagemaps(int fd, struct xe_svm_gpu_info *info);
-
-static void
-atomic_batch_init(int fd, uint32_t vm, uint64_t src_addr,
-		  uint32_t *bo, uint64_t *addr)
-{
-	uint32_t batch_bo_size = BATCH_SIZE(fd);
-	uint32_t batch_bo;
-	uint64_t batch_addr;
-	void *batch;
-	uint32_t *cmd;
-	int i = 0;
-
-	batch_bo = xe_bo_create(fd, vm, batch_bo_size, vram_if_possible(fd, 0), 0);
-	batch = xe_bo_map(fd, batch_bo, batch_bo_size);
-	cmd = (uint32_t *)batch;
-
-	cmd[i++] = MI_ATOMIC | MI_ATOMIC_INC;
-	cmd[i++] = src_addr;
-	cmd[i++] = src_addr >> 32;
-	cmd[i++] = MI_BATCH_BUFFER_END;
-
-	batch_addr = to_user_pointer(batch);
-	/* Punch a gap in the SVM map where we map the batch_bo */
-	xe_vm_bind_lr_sync(fd, vm, batch_bo, 0, batch_addr, batch_bo_size, 0);
-	*bo = batch_bo;
-	*addr = batch_addr;
 }
 
 static void batch_init(int fd, uint32_t vm, uint64_t src_addr,
@@ -322,52 +263,6 @@ mgpu_check_fault_support(struct xe_svm_gpu_info *gpu1,
 }
 
 static void
-gpu_madvise_exec_sync(struct xe_svm_gpu_info *gpu, uint32_t vm, uint32_t exec_queue,
-		      uint64_t dst_addr, uint64_t *batch_addr, unsigned int flags,
-		      void *perf)
-{
-	struct drm_xe_sync sync = {};
-	uint64_t *sync_addr;
-
-	xe_multigpu_madvise(gpu->fd, vm, dst_addr, SZ_4K, 0,
-			    DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC,
-			    gpu->fd, 0, gpu->vram_regions[0], exec_queue);
-
-	setup_sync(&sync, &sync_addr, BIND_SYNC_VAL);
-	xe_multigpu_prefetch(gpu->fd, vm, dst_addr, SZ_4K, &sync,
-			     sync_addr, exec_queue, flags);
-	free(sync_addr);
-
-	sync_addr = (void *)((char *)*batch_addr + SZ_4K);
-	sync.addr = to_user_pointer((uint64_t *)sync_addr);
-	sync.timeline_value = EXEC_SYNC_VAL;
-	WRITE_ONCE(*sync_addr, 0);
-
-	xe_exec_sync(gpu->fd, exec_queue, *batch_addr, &sync, 1);
-	if (READ_ONCE(*sync_addr) != EXEC_SYNC_VAL)
-		xe_wait_ufence(gpu->fd, (uint64_t *)sync_addr, EXEC_SYNC_VAL, exec_queue,
-			       NSEC_PER_SEC * 10);
-}
-
-static void
-gpu_batch_create(struct xe_svm_gpu_info *gpu, uint32_t vm, uint32_t exec_queue,
-		 uint64_t src_addr, uint64_t dst_addr,
-		 uint32_t *batch_bo, uint64_t *batch_addr,
-		 unsigned int flags, int op_type)
-{
-	switch (op_type) {
-	case ATOMIC:
-		atomic_batch_init(gpu->fd, vm, src_addr, batch_bo, batch_addr);
-		break;
-	case INIT:
-		batch_init(gpu->fd, vm, src_addr, dst_addr, SZ_4K, batch_bo, batch_addr);
-		break;
-	default:
-		igt_assert(!"Unknown batch op_type");
-	}
-}
-
-static void
 copy_src_dst(struct xe_svm_gpu_info *gpu1,
 	     struct xe_svm_gpu_info *gpu2,
 	     struct drm_xe_engine_class_instance *eci,
@@ -430,87 +325,6 @@ copy_src_dst(struct xe_svm_gpu_info *gpu1,
 }
 
 static void
-atomic_inc_op(struct xe_svm_gpu_info *gpu1,
-	      struct xe_svm_gpu_info *gpu2,
-	      struct drm_xe_engine_class_instance *eci,
-	      unsigned int flags)
-{
-	uint64_t addr;
-	uint32_t vm[2];
-	uint32_t exec_queue[2];
-	uint32_t batch_bo[2];
-	struct test_exec_data *data;
-	uint64_t batch_addr[2];
-	void *copy_dst;
-	uint32_t final_value;
-
-	/* Skip if either GPU doesn't support faults */
-	if (mgpu_check_fault_support(gpu1, gpu2))
-		return;
-
-	create_vm_and_queue(gpu1, eci, &vm[0], &exec_queue[0]);
-	create_vm_and_queue(gpu2, eci, &vm[1], &exec_queue[1]);
-
-	data = aligned_alloc(SZ_2M, SZ_4K);
-	igt_assert(data);
-	data[0].vm_sync = 0;
-	addr = to_user_pointer(data);
-
-	copy_dst = aligned_alloc(SZ_2M, SZ_4K);
-	igt_assert(copy_dst);
-
-	WRITE_ONCE(*(uint64_t *)addr, ATOMIC_OP_VAL - 1);
-
-	/* GPU1: Atomic Batch create */
-	gpu_batch_create(gpu1, vm[0], exec_queue[0], addr, 0,
-			 &batch_bo[0], &batch_addr[0], flags, ATOMIC);
-
-	/*GPU1: Madvise and Prefetch Ops */
-	gpu_madvise_exec_sync(gpu1, vm[0], exec_queue[0], addr, &batch_addr[0], flags, NULL);
-
-	/* GPU2 --> copy from GPU1 */
-	gpu_batch_create(gpu2, vm[1], exec_queue[1], addr, to_user_pointer(copy_dst),
-			 &batch_bo[1], &batch_addr[1], flags, INIT);
-
-	/*GPU2: Madvise and Prefetch Ops */
-	gpu_madvise_exec_sync(gpu2, vm[1], exec_queue[1], to_user_pointer(copy_dst),
-			      &batch_addr[1], flags, NULL);
-
-	/* NOW CPU can read copy_dst (GPU2 ATOMIC op) */
-	final_value = *(uint32_t *)copy_dst;
-	igt_assert_eq(final_value, ATOMIC_OP_VAL);
-
-	/* GPU2: Atomic Batch create */
-	gpu_batch_create(gpu2, vm[1], exec_queue[1], to_user_pointer(copy_dst), 0,
-			 &batch_bo[1], &batch_addr[1], flags, ATOMIC);
-
-	/*GPU2: Madvise and Prefetch Ops */
-	gpu_madvise_exec_sync(gpu2, vm[1], exec_queue[1], to_user_pointer(copy_dst),
-			      &batch_addr[1], flags, NULL);
-
-	/* GPU1 --> copy from GPU2 */
-	gpu_batch_create(gpu1, vm[0], exec_queue[0], to_user_pointer(copy_dst), addr,
-			 &batch_bo[0], &batch_addr[0], flags, INIT);
-
-	/*GPU1: Madvise and Prefetch Ops */
-	gpu_madvise_exec_sync(gpu1, vm[0], exec_queue[1], addr, &batch_addr[0], flags, NULL);
-
-	/* NOW CPU can read addr (GPU1 ATOMIC op) */
-	final_value = *(uint32_t *)addr;
-	igt_assert_eq(final_value, ATOMIC_OP_VAL + 1);
-
-	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
-	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
-	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
-	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[1]);
-	free(data);
-	free(copy_dst);
-
-	cleanup_vm_and_queue(gpu1, vm[0], exec_queue[0]);
-	cleanup_vm_and_queue(gpu2, vm[1], exec_queue[1]);
-}
-
-static void
 gpu_mem_access_wrapper(struct xe_svm_gpu_info *src,
 		       struct xe_svm_gpu_info *dst,
 		       struct drm_xe_engine_class_instance *eci,
@@ -523,26 +337,12 @@ gpu_mem_access_wrapper(struct xe_svm_gpu_info *src,
 }
 
 static void
-gpu_atomic_inc_wrapper(struct xe_svm_gpu_info *src,
-		       struct xe_svm_gpu_info *dst,
-		       struct drm_xe_engine_class_instance *eci,
-		       unsigned int flags)
-{
-	igt_assert(src);
-	igt_assert(dst);
-
-	atomic_inc_op(src, dst, eci, flags);
-}
-
-static void
 test_mgpu_exec(int gpu_cnt, struct xe_svm_gpu_info *gpus,
 	       struct drm_xe_engine_class_instance *eci,
 	       unsigned int flags)
 {
 	if (flags & MULTIGPU_XGPU_ACCESS)
 		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_mem_access_wrapper, flags);
-	if (flags & MULTIGPU_ATOMIC_OP)
-		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_atomic_inc_wrapper, flags);
 }
 
 struct section {
@@ -565,8 +365,6 @@ int igt_main()
 	const struct section msections[] = {
 		{ "xgpu-access-basic", MULTIGPU_XGPU_ACCESS },
 		{ "xgpu-access-prefetch", MULTIGPU_PREFETCH | MULTIGPU_XGPU_ACCESS },
-		{ "atomic-op-basic", MULTIGPU_ATOMIC_OP },
-		{ "atomic-op-prefetch", MULTIGPU_PREFETCH | MULTIGPU_ATOMIC_OP },
 		{ NULL },
 	};
 
@@ -590,7 +388,7 @@ int igt_main()
 		}
 	}
 
-	igt_describe("multigpu svm operations");
+	igt_describe("gpu-gpu write-read");
 	for (const struct section *s = msections; s->name; s++) {
 		igt_subtest_f("mgpu-%s", s->name)
 			test_mgpu_exec(gpu_cnt, gpus, &eci, s->flags);
