@@ -1504,7 +1504,6 @@ struct drm_xe_exec {
 	/** @exec_queue_id: Exec queue ID for the batch buffer */
 	__u32 exec_queue_id;
 
-#define DRM_XE_MAX_SYNCS 1024
 	/** @num_syncs: Amount of struct drm_xe_sync in array. */
 	__u32 num_syncs;
 
@@ -1696,9 +1695,6 @@ enum drm_xe_oa_unit_type {
 
 	/** @DRM_XE_OA_UNIT_TYPE_OAM_SAG: OAM_SAG OA unit */
 	DRM_XE_OA_UNIT_TYPE_OAM_SAG,
-
-	/** @DRM_XE_OA_UNIT_TYPE_MERT: MERT OA unit */
-	DRM_XE_OA_UNIT_TYPE_MERT,
 };
 
 /**
