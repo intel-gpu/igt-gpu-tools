@@ -206,35 +206,6 @@ void xe_spin_init(struct xe_spin *spin, struct xe_spin_opts *opts)
 }
 
 /**
- * xe_spin_reset:
- * @fd: xe device file descriptor
- * @spin: spin state from xe_spin_new()
- *
- * Reset the state of spin, allowing its reuse.
- */
-void xe_spin_reset(int fd, igt_spin_t *spin)
-{
-	struct drm_xe_sync sync = {
-		.type = DRM_XE_SYNC_TYPE_SYNCOBJ,
-		.flags = DRM_XE_SYNC_FLAG_SIGNAL,
-		.handle = spin->syncobj,
-	};
-	struct drm_xe_exec exec = {
-		.num_batch_buffer = 1,
-		.num_syncs = 1,
-		.syncs = to_user_pointer(&sync),
-		.exec_queue_id = spin->engine,
-		.address = spin->address,
-	};
-
-	xe_spin_init_opts((struct xe_spin *)spin->xe_spin,
-			  .addr = spin->address,
-			  .preempt = !(spin->opts.flags & IGT_SPIN_NO_PREEMPTION));
-	igt_assert_eq(igt_ioctl(fd, DRM_IOCTL_XE_EXEC, &exec), 0);
-	xe_spin_wait_started((struct xe_spin *)spin->xe_spin);
-}
-
-/**
  * xe_spin_started:
  * @spin: pointer to spinner mapped bo
  *
