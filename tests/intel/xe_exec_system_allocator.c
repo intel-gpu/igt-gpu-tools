@@ -2178,7 +2178,7 @@ processes(int fd, int n_exec_queues, int n_execs, size_t bo_size,
  * Test category: functionality test
  */
 static void
-test_compute(int fd, size_t size)
+test_compute(int fd, struct drm_xe_engine_class_instance *eci, size_t size)
 {
 	struct drm_xe_sync sync = {
 		.type = DRM_XE_SYNC_TYPE_USER_FENCE,
@@ -2192,7 +2192,7 @@ test_compute(int fd, size_t size)
 	struct user_execenv env = {
 		.array_size = size / sizeof(float),
 	};
-	float *compute_input;
+	float *compute_input, *compute_output;
 	int i;
 
 	vm = xe_vm_create(fd, DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE, 0);
@@ -2203,14 +2203,21 @@ test_compute(int fd, size_t size)
 
 	compute_input = aligned_alloc(SZ_2M, size);
 	igt_assert(compute_input);
+	compute_output = aligned_alloc(SZ_2M, size);
+	igt_assert(compute_output);
 
 	for (i = 0; i < env.array_size; i++)
 		compute_input[i] = rand() / (float)RAND_MAX;
 
 	env.input_addr = to_user_pointer(compute_input);
+	env.output_addr = to_user_pointer(compute_output);
 	env.vm = vm;
 	run_intel_compute_kernel(fd, &env, EXECENV_PREF_SYSTEM);
 
+	for (i = 0; i < env.array_size; i++)
+		igt_assert_eq_double(compute_input[i] * compute_input[i], compute_output[i]);
+
+	free(compute_output);
 	free(compute_input);
 	unbind_system_allocator();
 	xe_vm_destroy(fd, vm);
@@ -2602,7 +2609,8 @@ int igt_main()
 	}
 
 	igt_subtest("compute")
-		test_compute(fd, SZ_2M);
+		xe_for_each_engine(fd, hwe)
+			test_compute(fd, hwe, SZ_2M);
 
 	igt_fixture() {
 		xe_device_put(fd);
