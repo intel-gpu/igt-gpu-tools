@@ -104,18 +104,13 @@ int __xe_wait_ufence(int fd, uint64_t *addr, uint64_t value,
 int64_t xe_wait_ufence(int fd, uint64_t *addr, uint64_t value,
 		       uint32_t exec_queue, int64_t timeout);
 int __xe_vm_madvise(int fd, uint32_t vm, uint64_t addr, uint64_t range, uint64_t ext,
-		    uint32_t type, uint32_t op_val, uint16_t policy, uint16_t instance);
+		    uint32_t type, uint32_t op_val, uint16_t policy);
 void xe_vm_madvise(int fd, uint32_t vm, uint64_t addr, uint64_t range, uint64_t ext,
-		   uint32_t type, uint32_t op_val, uint16_t policy, uint16_t instance);
+		   uint32_t type, uint32_t op_val, uint16_t policy);
 int xe_vm_number_vmas_in_range(int fd, struct drm_xe_vm_query_mem_range_attr *vmas_attr);
 int xe_vm_vma_attrs(int fd, struct drm_xe_vm_query_mem_range_attr *vmas_attr,
 		    struct drm_xe_mem_range_attr *mem_attr);
 struct drm_xe_mem_range_attr
 *xe_vm_get_mem_attr_values_in_range(int fd, uint32_t vm, uint64_t start,
 				    uint64_t range, uint32_t *num_ranges);
-void xe_vm_bind_lr_sync(int fd, uint32_t vm, uint32_t bo,
-			uint64_t offset, uint64_t addr,
-			uint64_t size, uint32_t flags);
-void xe_vm_unbind_lr_sync(int fd, uint32_t vm, uint64_t offset,
-			  uint64_t addr, uint64_t size);
 #endif /* XE_IOCTL_H */
