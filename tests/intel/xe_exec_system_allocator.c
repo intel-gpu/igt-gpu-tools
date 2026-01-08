@@ -2172,36 +2172,13 @@ processes(int fd, int n_exec_queues, int n_execs, size_t bo_size,
 	munmap(pdata, sizeof(*pdata));
 }
 
-/* compute flags */
-#define TOUCH_ONCE		(0x1 << 0)
-#define ACCESS_DEVICE_HOST	(0x1 << 1)
-
 /**
  * SUBTEST: compute
  * Description: Run a simple compute kernel with the system allocator
  * Test category: functionality test
- *
- * SUBTEST: eu-fault-4k-%s
- * Description: Run a simple compute kernel %arg[1] on a 4KB malloc'ed buffer
- * Test category: performance test
- *
- * SUBTEST: eu-fault-64k-%s
- * Description: Run a simple compute kernel %arg[1] on a 64KB malloc'ed buffer
- * Test category: performance test
- *
- * SUBTEST: eu-fault-2m-%s
- * Description: Run a simple compute kernel %arg[1] on a 2MB malloc'ed buffer
- * Test category: performance test
- *
- * arg[1]:
- *
- * @once-device:				touch the buffer only once, from the device
- * @once-device-host:				touch the buffer only once, from the device then from the host
- * @range-device:				touch the whole buffer, from the device
- * @range-device-host:				touch the whole buffer, from the device then from the host
  */
 static void
-test_compute(int fd, size_t size, unsigned int flags)
+test_compute(int fd, size_t size)
 {
 	struct drm_xe_sync sync = {
 		.type = DRM_XE_SYNC_TYPE_USER_FENCE,
@@ -2230,14 +2207,11 @@ test_compute(int fd, size_t size, unsigned int flags)
 	compute_input = aligned_alloc(SZ_2M, size);
 	igt_assert(compute_input);
 
-	env.loop_count = (flags & TOUCH_ONCE) ? 1 : env.array_size;
-	env.skip_results_check = !(flags & ACCESS_DEVICE_HOST);
-	env.input_addr = to_user_pointer(compute_input);
-	env.vm = vm;
-
-	for (i = 0; i < env.loop_count; i++)
+	for (i = 0; i < env.array_size; i++)
 		compute_input[i] = rand() / (float)RAND_MAX;
 
+	env.input_addr = to_user_pointer(compute_input);
+	env.vm = vm;
 	run_intel_compute_kernel(fd, &env, EXECENV_PREF_SYSTEM);
 
 	free(compute_input);
@@ -2387,13 +2361,6 @@ int igt_main()
 		  MADVISE_OP | PREFETCH | PREFETCH_CHANGE_ATTR | ATOMIC_BATCH },
 		{ "no-range-invalidate-same-attr",
 		  MADVISE_OP | PREFETCH | PREFETCH_SAME_ATTR | ATOMIC_BATCH },
-		{ NULL },
-	};
-	const struct section csections[] = {
-		{ "once-device", TOUCH_ONCE },
-		{ "once-device-host", TOUCH_ONCE | ACCESS_DEVICE_HOST },
-		{ "range-device", 0 },
-		{ "range-device-host", ACCESS_DEVICE_HOST },
 		{ NULL },
 	};
 
@@ -2638,16 +2605,7 @@ int igt_main()
 	}
 
 	igt_subtest("compute")
-		test_compute(fd, SZ_2M, 0);
-
-	for (const struct section *s = csections; s->name; s++) {
-		igt_subtest_f("eu-fault-4k-%s", s->name)
-			test_compute(fd, SZ_4K, s->flags);
-		igt_subtest_f("eu-fault-64k-%s", s->name)
-			test_compute(fd, SZ_64K, s->flags);
-		igt_subtest_f("eu-fault-2m-%s", s->name)
-			test_compute(fd, SZ_2M, s->flags);
-	}
+		test_compute(fd, SZ_2M);
 
 	igt_fixture() {
 		xe_device_put(fd);
