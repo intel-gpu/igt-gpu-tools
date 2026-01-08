@@ -3,7 +3,6 @@
  * Copyright © 2025 Intel Corporation
  */
 
-#include <inttypes.h>
 #include <unistd.h>
 
 #include "drmtest.h"
@@ -408,10 +407,10 @@ static void batch_init(int fd, uint32_t vm, uint64_t src_addr,
 	cmd[i++] = height - 1;
 	cmd[i++] = width - 1;
 	cmd[i++] = width - 1;
-	cmd[i++] = lower_32_bits(src_addr);
-	cmd[i++] = upper_32_bits(src_addr);
-	cmd[i++] = lower_32_bits(dst_addr);
-	cmd[i++] = upper_32_bits(dst_addr);
+	cmd[i++] = src_addr & ((1UL << 32) - 1);
+	cmd[i++] = src_addr >> 32;
+	cmd[i++] = dst_addr & ((1UL << 32) - 1);
+	cmd[i++] = dst_addr >> 32;
 	if (intel_graphics_ver(dev_id) >= IP_VER(20, 0)) {
 		cmd[i++] = mocs_index << XE2_MEM_COPY_SRC_MOCS_SHIFT | mocs_index;
 	} else {
@@ -543,7 +542,7 @@ gpu_madvise_exec_sync(struct xe_svm_gpu_info *gpu, struct xe_svm_gpu_info *xgpu,
 			     sync_addr, exec_queue, flags);
 	free(sync_addr);
 
-	sync_addr = (uint64_t *)((char *)from_user_pointer(*batch_addr) + SZ_4K);
+	sync_addr = (void *)((char *)*batch_addr + SZ_4K);
 	sync.addr = to_user_pointer((uint64_t *)sync_addr);
 	sync.timeline_value = EXEC_SYNC_VAL;
 	WRITE_ONCE(*sync_addr, 0);
@@ -631,7 +630,7 @@ copy_src_dst(struct xe_svm_gpu_info *gpu1,
 			     sync_addr, exec_queue[0], flags);
 	free(sync_addr);
 
-	sync_addr = (uint64_t *)((char *)from_user_pointer(batch_addr) + SZ_4K);
+	sync_addr = (void *)((char *)batch_addr + SZ_4K);
 	sync.addr = to_user_pointer((uint64_t *)sync_addr);
 	sync.timeline_value = EXEC_SYNC_VAL;
 	WRITE_ONCE(*sync_addr, 0);
@@ -646,7 +645,7 @@ copy_src_dst(struct xe_svm_gpu_info *gpu1,
 
 	free(copy_dst);
 	free(copy_src);
-	munmap(from_user_pointer(batch_addr), BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch_addr, BATCH_SIZE(gpu1->fd));
 	batch_fini(gpu1->fd, vm[0], batch_bo, batch_addr);
 	cleanup_vm_and_queue(gpu1, vm[0], exec_queue[0]);
 }
@@ -681,7 +680,7 @@ atomic_inc_op(struct xe_svm_gpu_info *gpu1,
 	copy_dst = aligned_alloc(SZ_2M, SZ_4K);
 	igt_assert(copy_dst);
 
-	WRITE_ONCE(*(uint64_t *)from_user_pointer(addr), ATOMIC_OP_VAL - 1);
+	WRITE_ONCE(*(uint64_t *)addr, ATOMIC_OP_VAL - 1);
 
 	/* GPU1: Atomic Batch create */
 	gpu_batch_create(gpu1, vm[0], exec_queue[0], addr, 0,
@@ -716,12 +715,12 @@ atomic_inc_op(struct xe_svm_gpu_info *gpu1,
 	gpu_madvise_exec_sync(gpu1, gpu2, vm[0], exec_queue[0], addr,
 			      &batch_addr[0], flags, NULL);
 
-	final_value = *(uint32_t *)from_user_pointer(addr);
+	final_value = *(uint32_t *)addr;
 	/* NOW CPU can read copy_dst (GPU1 ATOMIC op) */
 	igt_assert_eq(final_value, ATOMIC_OP_VAL + 1);
 
-	munmap(from_user_pointer(batch_addr[0]), BATCH_SIZE(gpu1->fd));
-	munmap(from_user_pointer(batch_addr[1]), BATCH_SIZE(gpu2->fd));
+	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
 	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
 	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[1]);
 	free(data);
@@ -788,7 +787,7 @@ coherency_test_multigpu(struct xe_svm_gpu_info *gpu1,
 
 		igt_info("verifying concurrent write race\n");
 
-		WRITE_ONCE(*(uint64_t *)from_user_pointer(addr), 0);
+		WRITE_ONCE(*(uint64_t *)addr, 0);
 
 		store_dword_batch_init(gpu1->fd, vm[0], addr, &batch1_bo[0],
 				       &batch1_addr[0], BATCH_VALUE + 10);
@@ -796,7 +795,7 @@ coherency_test_multigpu(struct xe_svm_gpu_info *gpu1,
 				       &batch1_addr[1], BATCH_VALUE + 20);
 
 		/* Setup sync for GPU1 */
-		sync_addr0 = (uint64_t *)((char *)from_user_pointer(batch1_addr[0]) + SZ_4K);
+		sync_addr0 = (void *)((char *)batch1_addr[0] + SZ_4K);
 		sync0.flags = DRM_XE_SYNC_FLAG_SIGNAL;
 		sync0.type = DRM_XE_SYNC_TYPE_USER_FENCE;
 		sync0.addr = to_user_pointer((uint64_t *)sync_addr0);
@@ -804,7 +803,7 @@ coherency_test_multigpu(struct xe_svm_gpu_info *gpu1,
 		WRITE_ONCE(*sync_addr0, 0);
 
 		/* Setup sync for GPU2 */
-		sync_addr1 = (uint64_t *)((char *)from_user_pointer(batch1_addr[1]) + SZ_4K);
+		sync_addr1 = (void *)((char *)batch1_addr[1] + SZ_4K);
 		sync1.flags = DRM_XE_SYNC_FLAG_SIGNAL;
 		sync1.type = DRM_XE_SYNC_TYPE_USER_FENCE;
 		sync1.addr = to_user_pointer((uint64_t *)sync_addr1);
@@ -846,19 +845,19 @@ coherency_test_multigpu(struct xe_svm_gpu_info *gpu1,
 		else if (coh_result == 0)
 			igt_warn("Both writes failed - coherency issue\n");
 		else
-			igt_warn("Unexpected value 0x%" PRIx64 " - possible coherency corruption\n",
+			igt_warn("Unexpected value 0x%lx - possible coherency corruption\n",
 				 coh_result);
 
-		munmap(from_user_pointer(batch1_addr[0]), BATCH_SIZE(gpu1->fd));
-		munmap(from_user_pointer(batch1_addr[1]), BATCH_SIZE(gpu2->fd));
+		munmap((void *)batch1_addr[0], BATCH_SIZE(gpu1->fd));
+		munmap((void *)batch1_addr[1], BATCH_SIZE(gpu2->fd));
 
 		batch_fini(gpu1->fd, vm[0], batch1_bo[0], batch1_addr[0]);
 		batch_fini(gpu2->fd, vm[1], batch1_bo[1], batch1_addr[1]);
 		free(result);
 	}
 
-	munmap(from_user_pointer(batch_addr[0]), BATCH_SIZE(gpu1->fd));
-	munmap(from_user_pointer(batch_addr[1]), BATCH_SIZE(gpu2->fd));
+	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
 	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
 	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[1]);
 	free(data1);
@@ -996,8 +995,8 @@ latency_test_multigpu(struct xe_svm_gpu_info *gpu1,
 			igt_warn("Prefetch not providing expected performance benefit\n");
 	}
 
-	munmap(from_user_pointer(batch_addr[0]), BATCH_SIZE(gpu1->fd));
-	munmap(from_user_pointer(batch_addr[1]), BATCH_SIZE(gpu2->fd));
+	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
 
 	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
 	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[1]);
@@ -1110,8 +1109,8 @@ pagefault_test_multigpu(struct xe_svm_gpu_info *gpu1,
 			 pf_count_gpu2_after - pf_count_gpu2_before);
 	}
 
-	munmap(from_user_pointer(batch_addr[0]), BATCH_SIZE(gpu1->fd));
-	munmap(from_user_pointer(batch_addr[1]), BATCH_SIZE(gpu2->fd));
+	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
 	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
 	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[0]);
 	free(data);
@@ -1153,7 +1152,7 @@ multigpu_access_test(struct xe_svm_gpu_info *gpu1,
 	data[0].vm_sync = 0;
 	addr = to_user_pointer(data);
 
-	WRITE_ONCE(*(uint64_t *)from_user_pointer(addr), 0);
+	WRITE_ONCE(*(uint64_t *)addr, 0);
 
 	/* GPU1: Atomic Batch create */
 	gpu_batch_create(gpu1, vm[0], exec_queue[0], addr, 0,
@@ -1196,16 +1195,14 @@ multigpu_access_test(struct xe_svm_gpu_info *gpu1,
 		bool last = (i == NUM_ITER - 1);
 
 		if (last) {
-			sync_addr[0] = (uint64_t *)((char *)from_user_pointer(batch_addr[0]) +
-						    SZ_4K);
+			sync_addr[0] = (void *)((char *)batch_addr[0] + SZ_4K);
 			sync[0].flags = DRM_XE_SYNC_FLAG_SIGNAL;
 			sync[0].type = DRM_XE_SYNC_TYPE_USER_FENCE;
 			sync[0].addr = to_user_pointer((uint64_t *)sync_addr[0]);
 			sync[0].timeline_value = EXEC_SYNC_VAL + i;
 			WRITE_ONCE(*sync_addr[0], 0);
 
-			sync_addr[1] = (uint64_t *)((char *)from_user_pointer(batch_addr[1]) +
-						    SZ_4K);
+			sync_addr[1] = (void *)((char *)batch_addr[1] + SZ_4K);
 			sync[1].flags = DRM_XE_SYNC_FLAG_SIGNAL;
 			sync[1].type = DRM_XE_SYNC_TYPE_USER_FENCE;
 			sync[1].addr = to_user_pointer((uint64_t *)sync_addr[1]);
@@ -1233,8 +1230,7 @@ multigpu_access_test(struct xe_svm_gpu_info *gpu1,
 				       exec_queue[1], NSEC_PER_SEC * 30);
 	}
 
-	igt_info("Both GPUs completed execution %u\n",
-		 READ_ONCE(*(uint32_t *)from_user_pointer(addr)));
+	igt_info("Both GPUs completed execution %u\n", READ_ONCE(*(uint32_t *)addr));
 
 	/* === Verification using GPU read (not CPU) === */
 	verify_result = aligned_alloc(SZ_2M, SZ_4K);
@@ -1245,7 +1241,7 @@ multigpu_access_test(struct xe_svm_gpu_info *gpu1,
 	gpu_batch_create(gpu1, vm[0], exec_queue[0], addr, to_user_pointer(verify_result),
 			 &verify_batch_bo, &verify_batch_addr, flags, INIT);
 
-	sync_addr[0] = (uint64_t *)((char *)from_user_pointer(verify_batch_addr) + SZ_4K);
+	sync_addr[0] = (void *)((char *)verify_batch_addr + SZ_4K);
 	sync[0].addr = to_user_pointer((uint64_t *)sync_addr[0]);
 	sync[0].timeline_value = EXEC_SYNC_VAL;
 	sync[0].flags = DRM_XE_SYNC_FLAG_SIGNAL;
@@ -1261,19 +1257,19 @@ multigpu_access_test(struct xe_svm_gpu_info *gpu1,
 	final_value = READ_ONCE(*(uint32_t *)verify_result);
 
 	igt_info("GPU verification batch copied value: %u\n", final_value);
-	igt_info("CPU direct read shows: %u\n", (unsigned int)*(uint64_t *)from_user_pointer(addr));
+	igt_info("CPU direct read shows: %u\n", (unsigned int)*(uint64_t *)addr);
 
 	/* Expected: 0 + (NUM_ITER * 2 GPUs) = 400 */
 	igt_assert_f((final_value == 2 * NUM_ITER),
 		     "Expected %u value, got %u\n",
 		     2 * NUM_ITER, final_value);
 
-	munmap(from_user_pointer(verify_batch_addr), BATCH_SIZE(gpu1->fd));
+	munmap((void *)verify_batch_addr, BATCH_SIZE(gpu1->fd));
 	batch_fini(gpu1->fd, vm[0], verify_batch_bo, verify_batch_addr);
 	free(verify_result);
 
-	munmap(from_user_pointer(batch_addr[0]), BATCH_SIZE(gpu1->fd));
-	munmap(from_user_pointer(batch_addr[1]), BATCH_SIZE(gpu2->fd));
+	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
 	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
 	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[1]);
 	free(data);
@@ -1360,8 +1356,8 @@ multigpu_migrate_test(struct xe_svm_gpu_info *gpu1,
 
 	igt_info("Migration test completed successfully\n");
 
-	munmap(from_user_pointer(batch1_addr[0]), BATCH_SIZE(gpu1->fd));
-	munmap(from_user_pointer(batch1_addr[1]), BATCH_SIZE(gpu2->fd));
+	munmap((void *)batch1_addr[0], BATCH_SIZE(gpu1->fd));
+	munmap((void *)batch1_addr[1], BATCH_SIZE(gpu2->fd));
 	batch_fini(gpu1->fd, vm[0], batch1_bo[0], batch1_addr[0]);
 	batch_fini(gpu2->fd, vm[1], batch1_bo[1], batch1_addr[1]);
 	free(data);
