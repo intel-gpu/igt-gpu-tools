@@ -81,7 +81,6 @@ void xe_spin_reset(int fd, igt_spin_t *spin);
 bool xe_spin_started(struct xe_spin *spin);
 void xe_spin_wait_started(struct xe_spin *spin);
 void xe_spin_end(struct xe_spin *spin);
-void xe_spin_sync_wait(int fd, struct igt_spin *spin);
 void xe_spin_preempt_wait(struct xe_spin *spin);
 void xe_spin_preempt_nowait(struct xe_spin *spin);
 

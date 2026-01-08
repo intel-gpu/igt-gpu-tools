@@ -351,19 +351,7 @@ xe_spin_create(int fd, const struct igt_spin_factory *opt)
 	return spin;
 }
 
-/**
- * xe_spin_sync_wait - Wait for a GPU spin workload to complete
- * @fd: File descriptor for the DRM device
- * @spin: Pointer to an igt_spin structure representing the spin workload
- *
- * This function blocks until the GPU spin operation associated with the
- * given `igt_spin` object has finished, ensuring that the function does
- * not return until the workload completes.
- * If the wait fails, `igt_assert()` will trigger an assertion failure.
- *
- * This function does not return a value. It aborts on failure.
- */
-void xe_spin_sync_wait(int fd, struct igt_spin *spin)
+static void xe_spin_sync_wait(int fd, struct igt_spin *spin)
 {
 	igt_assert(syncobj_wait(fd, &spin->syncobj, 1, INT64_MAX, 0, NULL));
 }
