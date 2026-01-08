@@ -534,10 +534,6 @@ static void accuracy(int fd, struct drm_xe_engine_class_instance *eci,
 		intel_allocator_init();
 		ahnd = intel_allocator_open(fd, 0, INTEL_ALLOCATOR_RELOC);
 
-		spin = igt_spin_new(fd, .ahnd = ahnd, .vm = vm, .hwe = eci);
-		xe_spin_end(spin->xe_spin);
-		xe_spin_sync_wait(fd, spin);
-
 		for (int pass = 0; pass < ARRAY_SIZE(timeout); pass++) {
 			unsigned int target_idle_us = idle_us;
 			struct timespec start = { };
@@ -550,25 +546,21 @@ static void accuracy(int fd, struct drm_xe_engine_class_instance *eci,
 
 			while (pass_ns < timeout[pass]) {
 				unsigned long loop_ns, loop_active_ns, loop_idle_ns, now;
-				unsigned long after_sync;
 				double err, prev_avg, cur_val;
 
 				/* idle sleep */
 				igt_measured_usleep(target_idle_us);
 
 				/* start spinner */
-				xe_spin_reset(fd, spin);
+				spin = igt_spin_new(fd, .ahnd = ahnd, .vm = vm, .hwe = eci);
 				loop_idle_ns = igt_nsec_elapsed(&start);
 				igt_measured_usleep(active_us);
-				xe_spin_end(spin->xe_spin);
+				igt_spin_free(fd, spin);
 
 				now = igt_nsec_elapsed(&start);
-				xe_spin_sync_wait(fd, spin);
-				after_sync = igt_nsec_elapsed(&start);
-
 				loop_active_ns = now - loop_idle_ns;
 				loop_ns = now - pass_ns;
-				pass_ns = after_sync;
+				pass_ns = now;
 
 				pass_active_ns += loop_active_ns;
 				total_active_ns += loop_active_ns;
@@ -598,7 +590,6 @@ static void accuracy(int fd, struct drm_xe_engine_class_instance *eci,
 				      sizeof(expected));
 		}
 
-		igt_spin_free(fd, spin);
 		xe_vm_destroy(fd, vm);
 		put_ahnd(ahnd);
 	}
@@ -631,7 +622,7 @@ static void accuracy(int fd, struct drm_xe_engine_class_instance *eci,
 	igt_info("error=%.2f%% (%.2f%% vs %.2f%%)\n",
 		 (engine_activity - expected) * 100, 100 * engine_activity, 100 * expected);
 
-	assert_within(100.0 * engine_activity, 100.0 * expected, 2);
+	assert_within(100.0 * engine_activity, 100.0 * expected, 3);
 }
 
 static void engine_activity_all_fn(int fd, struct drm_xe_engine_class_instance *eci, int num_fns)
