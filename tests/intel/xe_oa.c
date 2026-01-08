@@ -382,7 +382,7 @@ static struct intel_xe_perf_metric_set *oa_unit_metric_set(const struct drm_xe_o
 		  oau->oa_unit_type == DRM_XE_OA_UNIT_TYPE_OAM_SAG))
 		test_set_name = "MediaSet1";
 	else
-		igt_assert_f(!"reached", "Unknown oa_unit_type %d\n", oau->oa_unit_type);
+		igt_assert(!"reached");
 
 	igt_list_for_each_entry(metric_set_iter, &intel_xe_perf->metric_sets, link) {
 		if (strcmp(metric_set_iter->symbol_name, test_set_name) == 0) {
