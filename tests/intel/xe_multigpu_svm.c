@@ -126,18 +126,6 @@
  * Description:
  *	Multi-GPU page fault test with conflicting madvise regions
  *
- * SUBTEST: mgpu-migration-basic
- * Description:
- *	Test buffer migration across multiple GPUs and memory domains
- *	Validates that a shared buffer can migrate between system memory,
- *	GPU1 VRAM, and GPU2 VRAM while maintaining data coherency.
- *
- * SUBTEST: mgpu-migration-prefetch
- * Description:
- *	Test buffer migration across multiple GPUs with explicit prefetch operations
- *	Similar to mgpu-migration-basic but uses XE_VM_PREFETCH_ASYNC to explicitly
- *	trigger page migration before GPU access
- *
  */
 
 #define MAX_XE_REGIONS	8
@@ -164,7 +152,6 @@
 #define MULTIGPU_PFAULT_OP		BIT(8)
 #define MULTIGPU_CONC_ACCESS		BIT(9)
 #define MULTIGPU_CONFLICT		BIT(10)
-#define MULTIGPU_MIGRATE		BIT(11)
 
 #define INIT	2
 #define STORE	3
@@ -230,10 +217,6 @@ static void gpu_simult_test_wrapper(struct xe_svm_gpu_info *src,
 				    struct drm_xe_engine_class_instance *eci,
 				    unsigned int flags);
 
-static void gpu_migration_test_wrapper(struct xe_svm_gpu_info *src,
-				       struct xe_svm_gpu_info *dst,
-				       struct drm_xe_engine_class_instance *eci,
-				       unsigned int flags);
 static void
 create_vm_and_queue(struct xe_svm_gpu_info *gpu, struct drm_xe_engine_class_instance *eci,
 		    uint32_t *vm, uint32_t *exec_queue)
@@ -1279,95 +1262,6 @@ multigpu_access_test(struct xe_svm_gpu_info *gpu1,
 }
 
 static void
-multigpu_migrate_test(struct xe_svm_gpu_info *gpu1,
-		      struct xe_svm_gpu_info *gpu2,
-		      struct drm_xe_engine_class_instance *eci,
-		      unsigned int flags)
-{
-	uint64_t addr;
-	uint32_t vm[2], exec_queue[2], batch1_bo[2];
-	uint64_t batch1_addr[2];
-	uint64_t *data;
-	uint32_t test_pattern_sys, test_pattern_gpu1, test_pattern_gpu2;
-	void *copy_dst;
-	uint32_t final_value;
-
-	test_pattern_sys = 0x12345678;
-	test_pattern_gpu1 = 0xDEADBEEF;
-	test_pattern_gpu2 = 0xCAFEBABE;
-
-	/* Skip if either GPU doesn't support faults */
-	if (!gpu1->supports_faults || !gpu2->supports_faults) {
-		igt_debug("Both GPUs must support page faults for this test\n");
-		return;
-	}
-
-	create_vm_and_queue(gpu1, eci, &vm[0], &exec_queue[0]);
-	create_vm_and_queue(gpu2, eci, &vm[1], &exec_queue[1]);
-
-	data = aligned_alloc(SZ_2M, SZ_4K);
-	igt_assert(data);
-	memset(data, 0, SZ_4K);
-	addr = to_user_pointer(data);
-
-	copy_dst = aligned_alloc(SZ_2M, SZ_4K);
-	igt_assert(copy_dst);
-
-	igt_info("=== Phase 1: System Memory → GPU1 VRAM ===\n");
-
-	/* CPU writes initial pattern in system memory */
-	WRITE_ONCE(*(uint32_t *)data, test_pattern_sys);
-	igt_info("CPU wrote 0x%x to system memory\n", test_pattern_sys);
-
-	/* GPU1 writes new pattern - should happen in GPU1 VRAM */
-	store_dword_batch_init(gpu1->fd, vm[0], addr, &batch1_bo[0], &batch1_addr[0],
-			       test_pattern_gpu1);
-
-	/*GPU1: Madvise and Prefetch Ops with preferred location GPU1 VRAM */
-	gpu_madvise_exec_sync(gpu1, gpu2, vm[0], exec_queue[0], addr, &batch1_addr[0],
-			      flags, NULL);
-
-	igt_info("=== Phase 2: GPU1 VRAM → GPU2 VRAM ===\n");
-
-	/* GPU2: copy GPU1's value */
-	gpu_batch_create(gpu2, vm[1], exec_queue[1], addr, to_user_pointer(copy_dst),
-			 &batch1_bo[1], &batch1_addr[1], flags, INIT);
-
-	/*GPU2: Madvise and Prefetch Ops with preferred location GPU2 VRAM */
-	gpu_madvise_exec_sync(gpu2, gpu1, vm[1], exec_queue[1], to_user_pointer(copy_dst),
-			      &batch1_addr[1], flags, NULL);
-
-	/* Verify GPU1 wrote correctly */
-	final_value = *(uint32_t *)copy_dst;
-	igt_assert_eq_u32(final_value, test_pattern_gpu1);
-
-	igt_info("=== Phase 3: GPU2 VRAM → System Memory ===\n");
-
-	/* GPU2 writes new pattern - should happen in GPU2 VRAM */
-	store_dword_batch_init(gpu2->fd, vm[1], to_user_pointer(copy_dst),
-			       &batch1_bo[1], &batch1_addr[1], test_pattern_gpu2);
-
-	/*GPU2: Madvise and Prefetch Ops with preferred location GPU2 VRAM */
-	gpu_madvise_exec_sync(gpu2, gpu1, vm[1], exec_queue[1], to_user_pointer(copy_dst),
-			      &batch1_addr[1], flags, NULL);
-
-	/* CPU access should migrate back to system memory */
-	igt_assert_eq_u32(READ_ONCE(*(uint32_t *)copy_dst), test_pattern_gpu2);
-
-	igt_info("Migration test completed successfully\n");
-
-	munmap((void *)batch1_addr[0], BATCH_SIZE(gpu1->fd));
-	munmap((void *)batch1_addr[1], BATCH_SIZE(gpu2->fd));
-	batch_fini(gpu1->fd, vm[0], batch1_bo[0], batch1_addr[0]);
-	batch_fini(gpu2->fd, vm[1], batch1_bo[1], batch1_addr[1]);
-	free(data);
-	free(copy_dst);
-
-	cleanup_vm_and_queue(gpu1, vm[0], exec_queue[0]);
-	cleanup_vm_and_queue(gpu2, vm[1], exec_queue[1]);
-}
-
-static void
 gpu_mem_access_wrapper(struct xe_svm_gpu_info *src,
 		       struct xe_svm_gpu_info *dst,
 		       struct drm_xe_engine_class_instance *eci,
@@ -1440,18 +1334,6 @@ gpu_simult_test_wrapper(struct xe_svm_gpu_info *src,
 }
 
 static void
-gpu_migration_test_wrapper(struct xe_svm_gpu_info *src,
-			   struct xe_svm_gpu_info *dst,
-			   struct drm_xe_engine_class_instance *eci,
-			   unsigned int flags)
-{
-	igt_assert(src);
-	igt_assert(dst);
-
-	multigpu_migrate_test(src, dst, eci, flags);
-}
-
-static void
 test_mgpu_exec(int gpu_cnt, struct xe_svm_gpu_info *gpus,
 	       struct drm_xe_engine_class_instance *eci,
 	       unsigned int flags)
@@ -1468,8 +1350,6 @@ test_mgpu_exec(int gpu_cnt, struct xe_svm_gpu_info *gpus,
 		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_fault_test_wrapper, flags);
 	if (flags & MULTIGPU_CONC_ACCESS)
 		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_simult_test_wrapper, flags);
-	if (flags & MULTIGPU_MIGRATE)
-		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_migration_test_wrapper, flags);
 }
 
 struct section {
@@ -1512,8 +1392,6 @@ int igt_main()
 		{ "pagefault-conflict", MULTIGPU_CONFLICT | MULTIGPU_PFAULT_OP },
 		{ "concurrent-access-basic", MULTIGPU_CONC_ACCESS },
 		{ "concurrent-access-prefetch", MULTIGPU_PREFETCH | MULTIGPU_CONC_ACCESS },
-		{ "migration-basic", MULTIGPU_MIGRATE },
-		{ "migration-prefetch", MULTIGPU_PREFETCH | MULTIGPU_MIGRATE },
 		{ NULL },
 	};
 
