@@ -4026,21 +4026,6 @@ static struct xe_oa_regs __oam_regs(u32 base)
 	};
 }
 
-static struct xe_oa_regs __oamert_regs(void)
-{
-	return (struct xe_oa_regs) {
-		.base		= 0,
-		.oa_head_ptr	= 0x1453ac,
-		.oa_tail_ptr	= 0x1453b0,
-		.oa_buffer	= 0x1453b4,
-		.oa_ctx_ctrl	= 0x1453c8,
-		.oa_ctrl	= 0x1453a0,
-		.oa_debug	= 0x1453a4,
-		.oa_status	= 0x1453a8,
-		.oa_mmio_trg	= 0x1453cc,
-	};
-}
-
 static struct xe_oa_regs oa_unit_regs(const struct drm_xe_oa_unit *oau)
 {
 	switch (oau->oa_unit_type) {
@@ -4056,8 +4041,6 @@ static struct xe_oa_regs oa_unit_regs(const struct drm_xe_oa_unit *oau)
 	}
 	case DRM_XE_OA_UNIT_TYPE_OAM_SAG:
 		return __oam_regs(XE_OAM_SAG_BASE_ADJ);
-	case DRM_XE_OA_UNIT_TYPE_MERT:
-		return __oamert_regs();
 	case DRM_XE_OA_UNIT_TYPE_OAG:
 		return __oag_regs();
 	default:
