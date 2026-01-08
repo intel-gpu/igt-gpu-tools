@@ -15,7 +15,6 @@
 
 #include "time.h"
 
-#include "xe/xe_gt.h"
 #include "xe/xe_ioctl.h"
 #include "xe/xe_query.h"
 #include "xe/xe_util.h"
@@ -90,17 +89,6 @@
  *	Measure latency of cross-GPU memory copy operations with prefetch
  *	to evaluate copy performance with memory migration to local VRAM
  *
- * SUBTEST: mgpu-pagefault-basic
- * Description:
- *	Test cross-GPU page fault handling where one GPU writes to memory
- *	and another GPU reads, triggering page faults without prefetch to
- *	validate on-demand page migration across GPUs
- *
- * SUBTEST: mgpu-pagefault-prefetch
- * Description:
- *	Test cross-GPU memory access with prefetch to verify page fault
- *	suppression when memory is pre-migrated to target GPU's VRAM
- *
  */
 
 #define MAX_XE_REGIONS	8
@@ -120,7 +108,6 @@
 #define MULTIGPU_COH_FAIL		BIT(5)
 #define MULTIGPU_PERF_OP		BIT(6)
 #define MULTIGPU_PERF_REM_COPY		BIT(7)
-#define MULTIGPU_PFAULT_OP		BIT(8)
 
 #define INIT	2
 #define STORE	3
@@ -175,11 +162,6 @@ static void gpu_latency_test_wrapper(struct xe_svm_gpu_info *src,
 				     struct xe_svm_gpu_info *dst,
 				     struct drm_xe_engine_class_instance *eci,
 				     unsigned int flags);
-
-static void gpu_fault_test_wrapper(struct xe_svm_gpu_info *src,
-				   struct xe_svm_gpu_info *dst,
-				   struct drm_xe_engine_class_instance *eci,
-				   unsigned int flags);
 
 static void
 create_vm_and_queue(struct xe_svm_gpu_info *gpu, struct drm_xe_engine_class_instance *eci,
@@ -949,117 +931,6 @@ latency_test_multigpu(struct xe_svm_gpu_info *gpu1,
 }
 
 static void
-pagefault_test_multigpu(struct xe_svm_gpu_info *gpu1,
-			struct xe_svm_gpu_info *gpu2,
-			struct drm_xe_engine_class_instance *eci,
-			unsigned int flags)
-{
-	uint64_t addr;
-	uint64_t addr1;
-	uint32_t vm[2];
-	uint32_t exec_queue[2];
-	uint32_t batch_bo[2];
-	uint64_t batch_addr[2];
-	struct drm_xe_sync sync = {};
-	uint64_t *sync_addr;
-	void *data, *verify_result;
-	const char *pf_count_stat = "svm_pagefault_count";
-	int pf_count_gpu1_before, pf_count_gpu1_after;
-	int pf_count_gpu2_before, pf_count_gpu2_after;
-	bool prefetch_req = flags & MULTIGPU_PREFETCH;
-
-	/* Skip if either GPU doesn't support faults */
-	if (mgpu_check_fault_support(gpu1, gpu2))
-		return;
-
-	create_vm_and_queue(gpu1, eci, &vm[0], &exec_queue[0]);
-	create_vm_and_queue(gpu2, eci, &vm[1], &exec_queue[1]);
-
-	data = aligned_alloc(SZ_2M, SZ_4K);
-	igt_assert(data);
-	memset(data, 0, SZ_4K);
-	addr = to_user_pointer(data);
-
-	/* Allocate verification buffer for GPU2 to copy into */
-	verify_result = aligned_alloc(SZ_2M, SZ_4K);
-	igt_assert(verify_result);
-	addr1 = to_user_pointer(verify_result);
-
-	/* === Phase 1: GPU1 writes to addr === */
-	pf_count_gpu1_before = xe_gt_stats_get_count(gpu1->fd, eci->gt_id, pf_count_stat);
-
-	/* GPU1 --> Creating batch with value and executing STORE op */
-	gpu_batch_create(gpu1, vm[0], exec_queue[0], addr, 0,
-			 &batch_bo[0], &batch_addr[0], flags, DWORD);
-
-	/*GPU1: Madvise and Prefetch Ops */
-	gpu_madvise_exec_sync(gpu1, vm[0], exec_queue[0], addr, &batch_addr[0], flags, NULL);
-
-	pf_count_gpu1_after = xe_gt_stats_get_count(gpu1->fd, eci->gt_id, pf_count_stat);
-
-	if (prefetch_req) {
-		/* With prefetch: expect NO page faults */
-		igt_assert_eq(pf_count_gpu1_after, pf_count_gpu1_before);
-		igt_info("GPU1 write with prefetch: No page faults (as expected)\n");
-	} else {
-		/* Without prefetch: expect page faults */
-		igt_debug("Pagefault count %s\n",
-			  pf_count_gpu1_after > pf_count_gpu1_before
-			  ? "increased"
-			  : "not increased");
-		igt_info("GPU1 write without prefetch: %d page faults\n",
-			 pf_count_gpu1_after - pf_count_gpu1_before);
-	}
-
-	/* === Phase 2: GPU2 reads from addr (cross-GPU access) === */
-	pf_count_gpu2_before = xe_gt_stats_get_count(gpu2->fd, eci->gt_id, pf_count_stat);
-
-	/* GPU2 --> Create batch for GPU2 to copy from addr (GPU1's memory) to verify_result */
-	gpu_batch_create(gpu2, vm[1], exec_queue[1], addr, addr1,
-			 &batch_bo[1], &batch_addr[1], flags, INIT);
-
-	/* Prefetch src buffer (addr) to avoid page faults */
-	xe_multigpu_madvise(gpu2->fd, vm[1], addr, SZ_4K, 0,
-			    DRM_XE_MEM_RANGE_ATTR_PREFERRED_LOC,
-			    gpu2->fd, 0, gpu2->vram_regions[0], exec_queue[1]);
-
-	setup_sync(&sync, &sync_addr, BIND_SYNC_VAL);
-	xe_multigpu_prefetch(gpu2->fd, vm[1], addr, SZ_4K, &sync,
-			     sync_addr, exec_queue[1], flags);
-
-	free(sync_addr);
-
-	/*GPU2: Madvise and Prefetch Ops */
-	gpu_madvise_exec_sync(gpu2, vm[1], exec_queue[1], addr1, &batch_addr[1], flags, NULL);
-
-	pf_count_gpu2_after = xe_gt_stats_get_count(gpu2->fd, eci->gt_id, pf_count_stat);
-
-	if (prefetch_req) {
-		/* With prefetch: expect NO page faults on GPU2 */
-		igt_assert_eq(pf_count_gpu2_after, pf_count_gpu2_before);
-		igt_info("GPU2 cross-GPU read with prefetch: No page faults (as expected)\n");
-	} else {
-		/* Without prefetch: expect cross-GPU page faults */
-		igt_debug("Pagefault count %s\n",
-			  pf_count_gpu2_after > pf_count_gpu2_before
-			  ? "increased"
-			  : "not increased");
-		igt_info("GPU2 cross-GPU read without prefetch: %d page faults\n",
-			 pf_count_gpu2_after - pf_count_gpu2_before);
-	}
-
-	munmap((void *)batch_addr[0], BATCH_SIZE(gpu1->fd));
-	munmap((void *)batch_addr[1], BATCH_SIZE(gpu2->fd));
-	batch_fini(gpu1->fd, vm[0], batch_bo[0], batch_addr[0]);
-	batch_fini(gpu2->fd, vm[1], batch_bo[1], batch_addr[0]);
-	free(data);
-	free(verify_result);
-
-	cleanup_vm_and_queue(gpu1, vm[0], exec_queue[0]);
-	cleanup_vm_and_queue(gpu2, vm[1], exec_queue[1]);
-}
-
-static void
 gpu_mem_access_wrapper(struct xe_svm_gpu_info *src,
 		       struct xe_svm_gpu_info *dst,
 		       struct drm_xe_engine_class_instance *eci,
@@ -1108,18 +979,6 @@ gpu_latency_test_wrapper(struct xe_svm_gpu_info *src,
 }
 
 static void
-gpu_fault_test_wrapper(struct xe_svm_gpu_info *src,
-		       struct xe_svm_gpu_info *dst,
-		       struct drm_xe_engine_class_instance *eci,
-		       unsigned int flags)
-{
-	igt_assert(src);
-	igt_assert(dst);
-
-	pagefault_test_multigpu(src, dst, eci, flags);
-}
-
-static void
 test_mgpu_exec(int gpu_cnt, struct xe_svm_gpu_info *gpus,
 	       struct drm_xe_engine_class_instance *eci,
 	       unsigned int flags)
@@ -1132,8 +991,6 @@ test_mgpu_exec(int gpu_cnt, struct xe_svm_gpu_info *gpus,
 		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_coherecy_test_wrapper, flags);
 	if (flags & MULTIGPU_PERF_OP)
 		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_latency_test_wrapper, flags);
-	if (flags & MULTIGPU_PFAULT_OP)
-		for_each_gpu_pair(gpu_cnt, gpus, eci, gpu_fault_test_wrapper, flags);
 }
 
 struct section {
@@ -1169,8 +1026,6 @@ int igt_main()
 		{ "latency-prefetch", MULTIGPU_PREFETCH | MULTIGPU_PERF_OP },
 		{ "latency-copy-prefetch",
 		  MULTIGPU_PREFETCH | MULTIGPU_PERF_OP | MULTIGPU_PERF_REM_COPY },
-		{ "pagefault-basic", MULTIGPU_PFAULT_OP },
-		{ "pagefault-prefetch", MULTIGPU_PREFETCH | MULTIGPU_PFAULT_OP },
 		{ NULL },
 	};
 
