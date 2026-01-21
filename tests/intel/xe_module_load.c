@@ -134,8 +134,7 @@ int igt_main()
 
 	igt_subtest("force-load") {
 		for (int i = 0; unwanted_drivers[i] != NULL; i++) {
-			igt_skip_on_f(igt_kmod_is_loaded(unwanted_drivers[i]),
-				      "%s is already loaded\n", unwanted_drivers[i]);
+			igt_intel_driver_unload(unwanted_drivers[i]);
 		}
 
 		load_and_check_xe("force_probe=*");
