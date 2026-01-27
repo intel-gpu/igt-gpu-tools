@@ -82,6 +82,9 @@
 			{ "CRI": "../intel-ci/xe.cri.core.blocklist.txt" },
 			{ "NVL": "../intel-ci/xe.nvl.core.blocklist.txt" },
 			{ "PTL": "../intel-ci/xe.ptl.core.blocklist.txt" },
+			{ "EUDEBUG-LNL": "../intel-ci/xe.lnl.eudebug.blocklist.txt" },
+			{ "EUDEBUG-BMG": "../intel-ci/xe.bmg.eudebug.blocklist.txt" },
+			{ "EUDEBUG-LNL, EUDEBUG-BMG": "../intel-ci/xe.eudebug.blocklist.txt" },
 			{ "WCL": "../intel-ci/xe.wcl.core.blocklist.txt" },
 			{ "all": "../intel-ci/xe.blocklist.txt" }
 		    ]
