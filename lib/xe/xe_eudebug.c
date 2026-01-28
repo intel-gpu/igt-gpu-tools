@@ -327,16 +327,22 @@ static int safe_pipe_read(int pipe[2], void *buf, int nbytes, int timeout_ms)
 
 static void pipe_signal(int pipe[2], uint64_t token)
 {
-	igt_assert(write(pipe[1], &token, sizeof(token)) == sizeof(token));
+	/* Skip signaling if pipe was already closed */
+	if (pipe[1] >= 0)
+		igt_assert(write(pipe[1], &token, sizeof(token)) == sizeof(token));
 }
 
 static void pipe_close(int pipe[2])
 {
-	if (pipe[0] != -1)
-		close(pipe[0]);
+	if (pipe[0] >= 0) {
+		igt_assert_eq(close(pipe[0]), 0);
+		pipe[0] = -1;
+	}
 
-	if (pipe[1] != -1)
-		close(pipe[1]);
+	if (pipe[1] >= 0) {
+		igt_assert_eq(close(pipe[1]), 0);
+		pipe[1] = -1;
+	}
 }
 
 #define DEAD_CLIENT 0xccccdead
