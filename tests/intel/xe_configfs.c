@@ -55,6 +55,7 @@ static void restore(int sig)
 {
 	int configfs_fd;
 
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 
 	/* Drop all custom configfs settings from subtests */
@@ -69,6 +70,7 @@ static void restore(int sig)
 
 static void set_survivability_mode(int configfs_device_fd, bool value)
 {
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 	igt_sysfs_set_boolean(configfs_device_fd, "survivability_mode", value);
 	igt_kmod_bind("xe", bus_addr);
@@ -113,6 +115,7 @@ static void test_engines_allowed_invalid(int configfs_device_fd)
 	 * These only test if engine parsing is correct, so just make sure
 	 * there's no device bound
 	 */
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -139,6 +142,7 @@ static void test_engines_allowed(int configfs_device_fd)
 	 * These only test if engine parsing is correct, so just make sure
 	 * there's no device bound
 	 */
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -169,6 +173,7 @@ static void test_gt_types_allowed(int configfs_device_fd)
 	 * These only test if gt type parsing is correct, so just make sure
 	 * there's no device bound
 	 */
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -231,6 +236,7 @@ static void test_ctx_restore_invalid(int configfs_device_fd, const char *type)
 	 * These only test if command parsing is correct,
 	 * so just make sure there's no device bound
 	 */
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -310,6 +316,7 @@ static void test_ctx_restore(int configfs_device_fd, const char *type)
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
 		const struct value *v = &values[i];
 
+		igt_audio_driver_unload(NULL);
 		igt_kmod_unbind("xe", bus_addr);
 
 		igt_info("Test %s\n", v->test);

@@ -716,6 +716,7 @@ igt_intel_driver_unload(const char *driver)
 
 int igt_xe_driver_unload(void)
 {
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", NULL);
 
 	igt_kmod_unload("xe");

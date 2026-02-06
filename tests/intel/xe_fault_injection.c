@@ -309,6 +309,7 @@ static void probe_fail_guc(int fd, const char pci_slot[], const char function_na
 		fault_params->times = MAX_INJECTIONS_PER_ITER;
 		setup_injection_fault(fault_params);
 		inject_fault_probe(fd, pci_slot, function_name);
+		igt_audio_driver_unload(NULL);
 		igt_kmod_unbind("xe", pci_slot);
 
 		/*
@@ -662,6 +663,7 @@ int igt_main_args("I:", NULL, help_str, opt_handler, NULL)
 			oa_add_config_fail(fd, sysfs, devid, pci_slot, s->name);
 
 	igt_fixture() {
+		igt_audio_driver_unload(NULL);
 		igt_kmod_unbind("xe", pci_slot);
 	}
 
@@ -673,6 +675,7 @@ int igt_main_args("I:", NULL, help_str, opt_handler, NULL)
 			err = inject_fault_probe(fd, pci_slot, s->name);
 
 			igt_assert_eq(should_pass ? 0 : INJECT_ERRNO, err);
+			igt_audio_driver_unload(NULL);
 			igt_kmod_unbind("xe", pci_slot);
 		}
 

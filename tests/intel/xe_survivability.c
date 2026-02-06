@@ -150,6 +150,7 @@ static void restore(int sig)
 {
 	int configfs_fd;
 
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 
 	configfs_fd = igt_configfs_open("xe");
@@ -162,6 +163,7 @@ static void restore(int sig)
 
 static void set_survivability_mode(int configfs_device_fd, bool value)
 {
+	igt_audio_driver_unload(NULL);
 	igt_kmod_unbind("xe", bus_addr);
 	igt_sysfs_set_boolean(configfs_device_fd, "survivability_mode", value);
 	igt_kmod_bind("xe", bus_addr);
