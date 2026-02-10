@@ -151,13 +151,15 @@ __xelp_gpgpu_execfunc(struct intel_bb *ibb,
 }
 
 static void
-fill_inline_data(uint32_t *inline_data, uint64_t target_offset, struct intel_buf *target)
+fill_inline_data(uint32_t *inline_data, uint64_t target_offset, struct intel_buf *target,
+		 uint32_t x_dim)
 {
 	igt_assert(target->surface[0].stride == intel_buf_width(target) * target->bpp/8);
 	*inline_data++ = lower_32_bits(target_offset);
 	*inline_data++ = upper_32_bits(target_offset);
 	*inline_data++ = target->surface[0].stride;
 	*inline_data++ = intel_buf_height(target);
+	*inline_data++ = x_dim;
 }
 
 static void
@@ -206,7 +208,7 @@ __xehp_gpgpu_execfunc(struct intel_bb *ibb,
 	/* Inline data is at 31th/32th dword of COMPUTE_WALKER, BSpec: 67028 */
 	inline_data = intel_bb_ptr(ibb) + 4 * (shdr->gen_ver < 2000 ? 31 : 32);
 	xehp_emit_compute_walk(ibb, 0, 0, x_dim * 16, y_dim, &idd, 0x0);
-	fill_inline_data(inline_data, CANONICAL(target->addr.offset), target);
+	fill_inline_data(inline_data, CANONICAL(target->addr.offset), target, x_dim);
 
 	intel_bb_out(ibb, MI_BATCH_BUFFER_END);
 	intel_bb_ptr_align(ibb, 32);

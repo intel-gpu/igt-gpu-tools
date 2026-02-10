@@ -27,6 +27,7 @@
 #define R1_TGT_ADDRESS r1.0<0;1,0>:uq
 #define R1_TGT_WIDTH r1.2<0;1,0>:ud
 #define R1_TGT_HEIGHT r1.3<0;1,0>:ud
+#define R1_DIM_X r1.4<0;1,0>:ud
 
 #define SET_SHARED_MEDIA_BLOCK_MSG_HDR(dst, y, width)	\
 (W)	mov (8)		dst.0<1>:ud	0x0:ud		;\
