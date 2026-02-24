@@ -133,6 +133,32 @@ igt@xe_pmu@.*fn-engine-activity.*
 igt@xe_mmap@pci-membarrier.*
 # fault-injection tests
 igt@xe_fault_injection@*
+###################################################################
+#Everything below applies only to xekmd‑backports-6.17 &Xe DKMS KV6.6
+##########################################################################
+#pat_sw_config debugfs not in xekmd-backport (new feature)
+#Tests temporarily blocklisted for 6.17/Xe-DKMS KV6.6
+#TODO: Re-evaluate support when future kernel versions enable this feature.
+############################################################################
+igt@xe_pat@(pat-index-all|pat-sanity)
+##############################################################################
+#gt_types_allowed sysfs not in xekmd-backport (new feature)
+#Tests temporarily blocklisted for 6.17/Xe-DKMS KV6.6
+#TODO: Re-evaluate support when future kernel versions enable this feature.
+###############################################################################
+igt@xe_configfs@gt-types-allowed
+#######################################################################
+#ctx_restore_post_bb, ctx_restore_mid_bb sysfs not in xekmd-backport (new feature)
+#Tests temporarily blocklisted for 6.17/Xe-DKMS KV6.6
+#TODO: Re-evaluate support when future kernel versions enable this feature.
+######################################################################
+igt@xe_configfs@ctx-restore-(mid|post)-bb(-invalid)?
+#####################################################################
+#xekmd-backport/Xe DKMS KV6.6 is intended for production kernels.
+#It does not support debug tests. Consequently, all klive tests have been
+#blocklisted for kernel 6.17 & Xe DKMS 6.6.
+####################################################################
+igt@xe_live_ktest@.*
 ##################################################################
 ##################################################################
 # Async flips with linear modifier are slower
