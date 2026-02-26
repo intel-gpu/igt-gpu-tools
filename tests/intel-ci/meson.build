@@ -13,6 +13,7 @@ intelci_files = [
   'xe.blocklist.txt',
   'xe.bmg.core.blocklist.txt',
   'xe.bmg.display.blocklist.txt',
+  'xe.bmg.dkms.blocklist.txt',
   'xe.bmg.eudebug.blocklist.txt',
   'xe.cri.core.blocklist.txt',
   'xe.eudebug.blocklist.txt',
