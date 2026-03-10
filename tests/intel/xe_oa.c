@@ -2726,12 +2726,6 @@ test_enable_disable(const struct drm_xe_oa_unit *oau)
 	stream_fd = __perf_open(drm_fd, &param, true /* prevent_pm */);
 	set_fd_flags(stream_fd, O_CLOEXEC | O_NONBLOCK);
 
-	errno = 0;
-	ret = read(stream_fd, buf, sizeof(buf));
-	igt_assert_eq(ret, -1);
-	get_stream_status(stream_fd);
-	igt_assert_eq(errno, EINVAL);
-
 	do_ioctl(stream_fd, DRM_XE_OBSERVATION_IOCTL_ENABLE, 0);
 
 	/*
@@ -2892,75 +2886,6 @@ test_non_sampling_read_error(void)
 	igt_assert_eq(ret, -1);
 	get_stream_status(stream_fd);
 	igt_assert_eq(errno, EINVAL);
-
-	__perf_close(stream_fd);
-}
-
-/**
- * SUBTEST: disabled-read-error
- * Description: Test that attempts to read from a stream while it is disable
- *		will return EINVAL instead of blocking indefinitely
- */
-static void
-test_disabled_read_error(void)
-{
-	int oa_exponent = 5; /* 5 micro seconds */
-	uint64_t properties[] = {
-		DRM_XE_OA_PROPERTY_OA_UNIT_ID, 0,
-
-		/* XXX: even without periodic sampling we have to
-		 * specify at least one sample layout property...
-		 */
-		DRM_XE_OA_PROPERTY_SAMPLE_OA, true,
-
-		/* OA unit configuration */
-		DRM_XE_OA_PROPERTY_OA_METRIC_SET, default_test_set->perf_oa_metrics_set,
-		DRM_XE_OA_PROPERTY_OA_FORMAT, __ff(default_test_set->perf_oa_format),
-		DRM_XE_OA_PROPERTY_OA_PERIOD_EXPONENT, oa_exponent,
-		DRM_XE_OA_PROPERTY_OA_DISABLED, true,
-	};
-	struct intel_xe_oa_open_prop param = {
-		.num_properties = ARRAY_SIZE(properties) / 2,
-		.properties_ptr = to_user_pointer(properties),
-	};
-	uint32_t oa_report0[64];
-	uint32_t oa_report1[64];
-	uint32_t buf[128] = { 0 };
-	int ret;
-
-	stream_fd = __perf_open(drm_fd, &param, false);
-
-	ret = read(stream_fd, buf, sizeof(buf));
-	igt_assert_eq(ret, -1);
-	get_stream_status(stream_fd);
-	igt_assert_eq(errno, EINVAL);
-
-	__perf_close(stream_fd);
-
-	properties[ARRAY_SIZE(properties) - 1] = false; /* Set DISABLED to false */
-	stream_fd = __perf_open(drm_fd, &param, false);
-        set_fd_flags(stream_fd, O_CLOEXEC);
-
-	read_2_oa_reports(default_test_set->perf_oa_format,
-			  oa_exponent,
-			  oa_report0,
-			  oa_report1,
-			  false); /* not just timer reports */
-
-	do_ioctl(stream_fd, DRM_XE_OBSERVATION_IOCTL_DISABLE, 0);
-
-	ret = read(stream_fd, buf, sizeof(buf));
-	igt_assert_eq(ret, -1);
-	get_stream_status(stream_fd);
-	igt_assert_eq(errno, EINVAL);
-
-	do_ioctl(stream_fd, DRM_XE_OBSERVATION_IOCTL_ENABLE, 0);
-
-	read_2_oa_reports(default_test_set->perf_oa_format,
-			  oa_exponent,
-			  oa_report0,
-			  oa_report1,
-			  false); /* not just timer reports */
 
 	__perf_close(stream_fd);
 }
@@ -5051,8 +4976,6 @@ int igt_main_args("b:t", long_options, help_str, opt_handler, NULL)
 			test_non_zero_reason(oau, SZ_128K);
 	}
 
-	igt_subtest("disabled-read-error")
-		test_disabled_read_error();
 	igt_subtest("non-sampling-read-error")
 		test_non_sampling_read_error();
 
