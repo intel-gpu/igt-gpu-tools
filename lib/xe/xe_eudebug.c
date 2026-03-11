@@ -1904,6 +1904,7 @@ static void metadata_event(struct xe_eudebug_client *c, uint32_t flags,
 	xe_eudebug_event_log_write(c->log, (void *)&em);
 }
 
+#define EU_DEBUG_TOGGLE "device/prelim_enable_eudebug"
 /**
  * __xe_eudebug_enable_getset
  * @fd: xe client
@@ -1913,13 +1914,12 @@ static void metadata_event(struct xe_eudebug_client *c, uint32_t flags,
  * Stores current eudebug feature state in @old if not NULL. Sets new eudebug
  * feature state to @new if not NULL. Asserts if both @old and @new are NULL.
  *
- * Returns: 0 on success, -1 on failure.
+ * Returns: 0 on success, -errno on failure.
  */
 int __xe_eudebug_enable_getset(int fd, bool *old, bool *new)
 {
-	static const char * const fname = "prelim_enable_eudebug";
 	int ret = 0;
-	int sysfs, device_fd;
+	int sysfs;
 	bool val_before;
 	struct stat st;
 
@@ -1928,15 +1928,10 @@ int __xe_eudebug_enable_getset(int fd, bool *old, bool *new)
 
 	sysfs = igt_sysfs_open(fd);
 	if (sysfs < 0)
-		return -1;
+		return -errno;
 
-	device_fd = openat(sysfs, "device", O_DIRECTORY | O_RDONLY);
-	close(sysfs);
-	if (device_fd < 0)
-		return -1;
-
-	if (!__igt_sysfs_get_boolean(device_fd, fname, &val_before)) {
-		ret = -1;
+	if (!__igt_sysfs_get_boolean(sysfs, EU_DEBUG_TOGGLE, &val_before)) {
+		ret = -errno;
 		goto out;
 	}
 
@@ -1946,14 +1941,14 @@ int __xe_eudebug_enable_getset(int fd, bool *old, bool *new)
 		*old = val_before;
 
 	if (new) {
-		if (__igt_sysfs_set_boolean(device_fd, fname, *new))
-			igt_assert_eq(igt_sysfs_get_boolean(device_fd, fname), *new);
+		if (__igt_sysfs_set_boolean(sysfs, EU_DEBUG_TOGGLE, *new))
+			igt_assert_eq(igt_sysfs_get_boolean(sysfs, EU_DEBUG_TOGGLE), *new);
 		else
-			ret = -1;
+			ret = -errno;
 	}
 
 out:
-	close(device_fd);
+	close(sysfs);
 
 	return ret;
 }
@@ -1971,10 +1966,18 @@ out:
  */
 bool xe_eudebug_enable(int fd, bool enable)
 {
+	char sysfs_path[PATH_MAX];
 	bool old = false;
 	int ret = __xe_eudebug_enable_getset(fd, &old, &enable);
 
-	igt_skip_on(ret);
+	if (ret == -ENOENT) {
+		igt_assert(igt_sysfs_path(fd, sysfs_path, sizeof(sysfs_path)));
+		igt_skip("'%s/" EU_DEBUG_TOGGLE
+			 "' sysfs attribute not found, EU DEBUG not supported\n", sysfs_path);
+	}
+
+	igt_abort_on_f(ret, "xe_eudebug_enable: Failed to %s eudebug\n",
+		       enable ? "enable" : "disable");
 
 	return old;
 }
