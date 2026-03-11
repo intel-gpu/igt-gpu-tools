@@ -419,22 +419,6 @@ static void client_signal(struct xe_eudebug_client *c,
 	token_signal(c->p_out, token, value);
 }
 
-static int __xe_eudebug_connect(int fd, pid_t pid, uint32_t flags, uint64_t events)
-{
-	struct prelim_drm_xe_eudebug_connect param = {
-		.pid = pid,
-		.flags = flags,
-	};
-	int debugfd;
-
-	debugfd = igt_ioctl(fd, PRELIM_DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
-
-	if (debugfd < 0)
-		return -errno;
-
-	return debugfd;
-}
-
 static void event_log_write_to_fd(struct xe_eudebug_event_log *l, int fd)
 {
 	igt_assert_eq(write(fd, &l->head, sizeof(l->head)),
@@ -949,14 +933,20 @@ static void event_log_sort(struct xe_eudebug_event_log *l)
  *
  * Returns: 0 if the debugger was successfully attached, -errno otherwise.
  */
-int xe_eudebug_connect(int fd, pid_t pid, uint32_t flags)
+static int xe_eudebug_connect(int fd, pid_t pid, uint32_t flags)
 {
-	int ret;
-	uint64_t events = 0; /* events filtering not supported yet! */
+	struct drm_xe_eudebug_connect param = {
+		.pid = pid,
+		.flags = flags,
+	};
+	int debugfd;
 
-	ret = __xe_eudebug_connect(fd, pid, flags, events);
+	debugfd = igt_ioctl(fd, DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
 
-	return ret;
+	if (debugfd < 0)
+		return -errno;
+
+	return debugfd;
 }
 
 /**
@@ -1311,6 +1301,39 @@ void xe_eudebug_debugger_destroy(struct xe_eudebug_debugger *d)
 	free(d);
 }
 
+static int __xe_eudebug_debugger_attach(struct xe_eudebug_debugger *d, pid_t pid)
+{
+	int ret;
+
+	igt_assert_eq(d->fd, -1);
+	igt_assert_eq(d->target_pid, 0);
+
+	ret = xe_eudebug_connect(d->master_fd, pid, 0);
+	if (ret < 0)
+		return ret;
+
+	d->fd = ret;
+	d->target_pid = pid;
+
+	return 0;
+}
+
+/**
+ * xe_eudebug_debugger_reattach:
+ * @d: pointer to the debugger
+ * @pid: pid of the process to attach to
+ *
+ * Re-establishes debugger connection to a process. To be used only for
+ * reconnection scenarios where the debugger was previously attached using
+ * xe_eudebug_debugger_attach() and detached with xe_eudebug_debugger_detach().
+ *
+ * Returns: 0 if the debugger was successfully reattached, -errno otherwise.
+ */
+int xe_eudebug_debugger_reattach(struct xe_eudebug_debugger *d, pid_t pid)
+{
+	return  __xe_eudebug_debugger_attach(d, pid);
+}
+
 /**
  * xe_eudebug_debugger_attach:
  * @d: pointer to the debugger
@@ -1325,19 +1348,12 @@ int xe_eudebug_debugger_attach(struct xe_eudebug_debugger *d,
 {
 	int ret;
 
-	igt_assert_eq(d->fd, -1);
-	igt_assert_neq(c->pid, 0);
-	ret = xe_eudebug_connect(d->master_fd, c->pid, 0);
-
+	ret = __xe_eudebug_debugger_attach(d, c->pid);
 	if (ret < 0)
 		return ret;
 
-	d->fd = ret;
-	d->target_pid = c->pid;
 	d->p_client[0] = c->p_in[0];
 	d->p_client[1] = c->p_in[1];
-
-	igt_debug("debugger connected to %" PRIu64 "\n", d->target_pid);
 
 	return 0;
 }

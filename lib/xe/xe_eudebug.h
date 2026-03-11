@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <xe_drm.h>
+#include <xe_drm_eudebug.h>
 
 #include "igt_core.h"
 #include "igt_list.h"
@@ -174,7 +175,6 @@ next_event(struct prelim_drm_xe_eudebug_event *e, struct xe_eudebug_event_log *l
 #define XE_EUDEBUG_FILTER_ALL				GENMASK(PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT, 0)
 #define XE_EUDEBUG_EVENT_IS_FILTERED(_e, _f)		((1UL << (_e)) & (_f))
 
-int xe_eudebug_connect(int fd, pid_t pid, uint32_t flags);
 const char *xe_eudebug_event_to_str(struct prelim_drm_xe_eudebug_event *e, char *buf, size_t len);
 struct prelim_drm_xe_eudebug_event *
 xe_eudebug_event_log_find_seqno(struct xe_eudebug_event_log *l, uint64_t seqno);
@@ -192,6 +192,7 @@ struct xe_eudebug_debugger *
 xe_eudebug_debugger_create(int xe, uint64_t flags, void *data);
 void xe_eudebug_debugger_destroy(struct xe_eudebug_debugger *d);
 int xe_eudebug_debugger_attach(struct xe_eudebug_debugger *d, struct xe_eudebug_client *c);
+int xe_eudebug_debugger_reattach(struct xe_eudebug_debugger *d, pid_t pid);
 void xe_eudebug_debugger_start_worker(struct xe_eudebug_debugger *d);
 void xe_eudebug_debugger_stop_worker(struct xe_eudebug_debugger *d);
 void xe_eudebug_debugger_detach(struct xe_eudebug_debugger *d);

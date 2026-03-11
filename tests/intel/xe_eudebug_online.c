@@ -2222,10 +2222,8 @@ static void eu_attention_debugger_detach_trigger(struct xe_eudebug_debugger *d,
 	 */
 	reset_debugger_log(d);
 
-	ret = xe_eudebug_connect(d->master_fd, c_pid, 0);
-	igt_assert(ret >= 0);
-	d->fd = ret;
-	d->target_pid = c_pid;
+	ret = xe_eudebug_debugger_reattach(d, c_pid);
+	igt_assert_eq(ret, 0);
 
 	/* Discovery worker will replay events that have occurred, which leads to
 	 * a vm event being sent and vm_open_trigger being re-run, which would lead
