@@ -1975,6 +1975,34 @@ static void metadata_event(struct xe_eudebug_client *c, uint32_t flags,
 }
 
 #define EU_DEBUG_TOGGLE "device/prelim_enable_eudebug"
+
+static char *get_card_name(int fd, char *card_name, size_t len)
+{
+	char sysfs_path[PATH_MAX];
+	char link_target[PATH_MAX];
+	char *card_start;
+	ssize_t link_len;
+
+	if (!igt_sysfs_path(fd, sysfs_path, sizeof(sysfs_path)))
+		return NULL;
+
+	link_len = readlink(sysfs_path, link_target, sizeof(link_target) - 1);
+	if (link_len < 0)
+		return NULL;
+
+	link_target[link_len] = '\0';
+
+	card_start = strstr(link_target, "card");
+	if (!card_start)
+		return NULL;
+
+	snprintf(card_name, len, "%s", card_start);
+	card_start = strchr(card_name, '/');
+	if (card_start)
+		*card_start = '\0';
+
+	return card_name;
+}
 /**
  * __xe_eudebug_enable_getset
  * @fd: xe client
@@ -2036,7 +2064,7 @@ out:
  */
 bool xe_eudebug_enable(int fd, bool enable)
 {
-	char sysfs_path[PATH_MAX];
+	char card_name[NAME_MAX];
 	bool old = false;
 	int ret = 0;
 
@@ -2058,9 +2086,13 @@ bool xe_eudebug_enable(int fd, bool enable)
 	}
 
 	if (ret == -ENOENT) {
-		igt_assert(igt_sysfs_path(fd, sysfs_path, sizeof(sysfs_path)));
-		igt_skip("'%s/" EU_DEBUG_TOGGLE
-			 "' sysfs attribute not found, EU DEBUG not supported\n", sysfs_path);
+		if (get_card_name(fd, card_name, sizeof(card_name)))
+			igt_skip("'/sys/class/drm/%s/" EU_DEBUG_TOGGLE
+				 "' sysfs attribute not found, EU DEBUG not supported\n",
+				 card_name);
+		else
+			igt_skip("'" EU_DEBUG_TOGGLE
+				 "' sysfs attribute not found, EU DEBUG not supported\n");
 	}
 
 	igt_abort_on_f(ret, "xe_eudebug_enable: Failed to %s eudebug\n",
