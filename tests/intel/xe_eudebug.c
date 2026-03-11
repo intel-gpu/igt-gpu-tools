@@ -1240,6 +1240,7 @@ static void test_race_discovery(int fd, unsigned int flags, int clients)
 	int count = clients * debuggers_per_client;
 	struct xe_eudebug_session *sessions, *s;
 	struct xe_eudebug_client *c;
+	struct timespec t = {};
 	pthread_t *threads;
 	int i, j;
 
@@ -1270,7 +1271,9 @@ static void test_race_discovery(int fd, unsigned int flags, int clients)
 	}
 
 	for (i = 0; i < count; i++) {
-		pthread_join(threads[i], NULL);
+		igt_assert_eq(clock_gettime(CLOCK_REALTIME, &t), 0);
+		t.tv_sec += XE_EUDEBUG_DEFAULT_TIMEOUT_SEC;
+		igt_assert_eq(pthread_timedjoin_np(threads[i], NULL, &t), 0);
 	}
 
 	for (i = count - 1; i > 0; i--) {
@@ -1322,6 +1325,7 @@ static void test_empty_discovery(int fd, unsigned int flags, int clients)
 	struct xe_eudebug_session **s;
 	pthread_t *threads;
 	int i, expected = flags & DISCOVERY_CLOSE_CLIENT ? 0 : RESOURCE_COUNT;
+	struct timespec t = {};
 
 	igt_assert(flags & (DISCOVERY_DESTROY_RESOURCES | DISCOVERY_CLOSE_CLIENT));
 
@@ -1337,8 +1341,11 @@ static void test_empty_discovery(int fd, unsigned int flags, int clients)
 		pthread_create(&threads[i], NULL, attach_dettach_thread, s[i]);
 	}
 
-	for (i = 0; i < clients; i++)
-		pthread_join(threads[i], NULL);
+	for (i = 0; i < clients; i++) {
+		igt_assert_eq(clock_gettime(CLOCK_REALTIME, &t), 0);
+		t.tv_sec += XE_EUDEBUG_DEFAULT_TIMEOUT_SEC;
+		igt_assert_eq(pthread_timedjoin_np(threads[i], NULL, &t), 0);
+	}
 
 	for (i = 0; i < clients; i++) {
 		xe_eudebug_client_wait_done(s[i]->client);
