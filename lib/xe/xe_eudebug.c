@@ -18,6 +18,57 @@
 #include "xe_ioctl.h"
 #include "xe/xe_query.h"
 
+struct debugger_fd_entry {
+	int fd;
+	struct igt_list_head link;
+};
+
+static IGT_LIST_HEAD(active_debugger_fds);
+static pthread_mutex_t active_debugger_fds_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void register_debugger_fd(int fd)
+{
+	struct debugger_fd_entry *entry;
+
+	entry = calloc(1, sizeof(*entry));
+	igt_assert(entry);
+	entry->fd = fd;
+	IGT_INIT_LIST_HEAD(&entry->link);
+
+	pthread_mutex_lock(&active_debugger_fds_lock);
+	igt_list_add(&entry->link, &active_debugger_fds);
+	pthread_mutex_unlock(&active_debugger_fds_lock);
+}
+
+static void unregister_debugger_fd(int fd)
+{
+	struct debugger_fd_entry *entry, *tmp;
+
+	pthread_mutex_lock(&active_debugger_fds_lock);
+	igt_list_for_each_entry_safe(entry, tmp, &active_debugger_fds, link) {
+		if (entry->fd == fd) {
+			igt_list_del(&entry->link);
+			free(entry);
+			break;
+		}
+	}
+	pthread_mutex_unlock(&active_debugger_fds_lock);
+}
+
+static void close_all_debugger_fds(void)
+{
+	struct debugger_fd_entry *entry, *tmp;
+
+	pthread_mutex_lock(&active_debugger_fds_lock);
+	igt_list_for_each_entry_safe(entry, tmp, &active_debugger_fds, link) {
+		igt_debug("closing leftover debugger fd %d\n", entry->fd);
+		close(entry->fd);
+		igt_list_del(&entry->link);
+		free(entry);
+	}
+	pthread_mutex_unlock(&active_debugger_fds_lock);
+}
+
 struct event_trigger {
 	xe_eudebug_trigger_fn fn;
 	int type;
@@ -1315,6 +1366,8 @@ static int __xe_eudebug_debugger_attach(struct xe_eudebug_debugger *d, pid_t pid
 	d->fd = ret;
 	d->target_pid = pid;
 
+	register_debugger_fd(d->fd);
+
 	return 0;
 }
 
@@ -1368,6 +1421,7 @@ int xe_eudebug_debugger_attach(struct xe_eudebug_debugger *d,
 void xe_eudebug_debugger_detach(struct xe_eudebug_debugger *d)
 {
 	igt_assert(d->target_pid);
+	unregister_debugger_fd(d->fd);
 	close(d->fd);
 	d->target_pid = 0;
 	d->fd = -1;
@@ -1984,7 +2038,24 @@ bool xe_eudebug_enable(int fd, bool enable)
 {
 	char sysfs_path[PATH_MAX];
 	bool old = false;
-	int ret = __xe_eudebug_enable_getset(fd, &old, &enable);
+	int ret = 0;
+
+	/* When disabling eudebug, close all active debugger sessions first. */
+	if (!enable)
+		close_all_debugger_fds();
+
+	/* 'struct drm_driver.postclose' runs asynchronously to 'close', wait for it to complete */
+	for (int i = 0; i < 10; ++i) {
+		ret = __xe_eudebug_enable_getset(fd, &old, &enable);
+
+		if (ret != -EBUSY)
+			break;
+
+		if (i < 9) {
+			igt_debug("xe_eudebug_enable: Failed (%d), retrying...\n", ret);
+			sleep(1);
+		}
+	}
 
 	if (ret == -ENOENT) {
 		igt_assert(igt_sysfs_path(fd, sysfs_path, sizeof(sysfs_path)));
