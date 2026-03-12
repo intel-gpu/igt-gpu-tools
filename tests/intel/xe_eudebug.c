@@ -2224,6 +2224,8 @@ struct vm_bind_clear_priv {
 	unsigned long sum;
 };
 
+#define VM_BIND_CLEAR_CLEAN_COOKIE 0x434c45414eULL
+
 static struct vm_bind_clear_priv *vm_bind_clear_priv_create(void)
 {
 	struct vm_bind_clear_priv *priv;
@@ -2245,8 +2247,13 @@ static void *vm_bind_clear_thread(void *data)
 {
 	const uint32_t CS_GPR0 = 0x600;
 	const size_t batch_size = 16;
+	const uint32_t metadata_type = 0;
 	struct drm_xe_sync uf_sync = {
 		.type = DRM_XE_SYNC_TYPE_USER_FENCE, .flags = DRM_XE_SYNC_FLAG_SIGNAL,
+	};
+	struct prelim_drm_xe_vm_bind_op_ext_attach_debug clean_ext = {
+		.base.name = PRELIM_XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG,
+		.cookie = VM_BIND_CLEAR_CLEAN_COOKIE,
 	};
 	struct vm_bind_clear_thread_priv *priv = data;
 	int fd = xe_eudebug_client_open_driver(priv->c);
@@ -2254,11 +2261,23 @@ static void *vm_bind_clear_thread(void *data)
 	uint32_t vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE;
 	size_t bo_size = xe_bb_size(fd, batch_size);
 	unsigned long count = 0;
+	uint8_t *metadata_data;
+	uint32_t metadata_id;
 	uint64_t *fence_data;
 	uint32_t vm;
 
 	vm_flags |= (priv->c->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
 	vm = xe_eudebug_client_vm_create(priv->c, fd, vm_flags, 0);
+
+	metadata_data = aligned_alloc(PAGE_SIZE, PAGE_SIZE);
+	igt_assert(metadata_data);
+	memset(metadata_data, 0, PAGE_SIZE);
+
+	metadata_id = xe_eudebug_client_metadata_create(priv->c, fd,
+							 metadata_type,
+							 PAGE_SIZE,
+							 metadata_data);
+	clean_ext.metadata_id = metadata_id;
 
 	/* init uf_sync */
 	fence_data = aligned_alloc(xe_get_default_alignment(fd), sizeof(*fence_data));
@@ -2305,7 +2324,8 @@ static void *vm_bind_clear_thread(void *data)
 					DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM);
 		memset(fence_data, 0, sizeof(*fence_data));
 		xe_eudebug_client_vm_bind_flags(priv->c, fd, vm, clean_bo, 0, clean_offset, bo_size,
-						0, &uf_sync, 1, 0);
+						0, &uf_sync, 1,
+						to_user_pointer(&clean_ext));
 		xe_wait_ufence(fd, fence_data, uf_sync.timeline_value, 0,
 			       XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * NSEC_PER_SEC);
 
@@ -2363,6 +2383,9 @@ static void *vm_bind_clear_thread(void *data)
 	priv->sum = count;
 
 	free(fence_data);
+	xe_eudebug_client_metadata_destroy(priv->c, fd, metadata_id,
+					  metadata_type, PAGE_SIZE);
+	free(metadata_data);
 	xe_eudebug_client_close_driver(priv->c, fd);
 	return NULL;
 }
@@ -2414,6 +2437,59 @@ static void vm_bind_clear_client(struct xe_eudebug_client *c)
 	xe_eudebug_client_close_driver(c, fd);
 }
 
+static struct prelim_drm_xe_eudebug_event_vm_bind_op *
+vm_bind_clear_find_op_event_by_ref(struct xe_eudebug_event_log *log, uint64_t bind_ref_seqno)
+{
+	struct prelim_drm_xe_eudebug_event *e = NULL;
+
+	xe_eudebug_for_each_event(e, log) {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *eo;
+
+		if (e->type != PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP)
+			continue;
+
+		if (!(e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE))
+			continue;
+
+		eo = (void *)e;
+		if (eo->vm_bind_ref_seqno == bind_ref_seqno)
+			return eo;
+	}
+
+	return NULL;
+}
+
+static bool vm_bind_clear_is_tagged_clean_bind(struct xe_eudebug_event_log *log,
+						       uint64_t bind_ref_seqno)
+{
+	struct prelim_drm_xe_eudebug_event *e = NULL;
+
+	xe_eudebug_for_each_event(e, log) {
+		struct prelim_drm_xe_eudebug_event_vm_bind_op_metadata *em;
+		struct prelim_drm_xe_eudebug_event_vm_bind_op *eo;
+
+		if (e->type != PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA)
+			continue;
+
+		if (!(e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE))
+			continue;
+
+		em = (void *)e;
+		if (em->metadata_cookie != VM_BIND_CLEAR_CLEAN_COOKIE)
+			continue;
+
+		eo = (struct prelim_drm_xe_eudebug_event_vm_bind_op *)
+			xe_eudebug_event_log_find_seqno(log, em->vm_bind_op_ref_seqno);
+		if (!eo)
+			continue;
+
+		if (eo->vm_bind_ref_seqno == bind_ref_seqno)
+			return true;
+	}
+
+	return false;
+}
+
 static void vm_bind_clear_test_trigger(struct xe_eudebug_debugger *d,
 				       struct prelim_drm_xe_eudebug_event *e)
 {
@@ -2421,18 +2497,38 @@ static void vm_bind_clear_test_trigger(struct xe_eudebug_debugger *d,
 	struct vm_bind_clear_priv *priv = d->ptr;
 
 	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
+		igt_debug("vm bind op event received with ref %lld, addr 0x%llx, range 0x%llx\n",
+			  eo->vm_bind_ref_seqno, eo->addr, eo->range);
+		priv->bind_count++;
+	}
+
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY)
+		priv->unbind_count++;
+}
+
+static void vm_bind_clear_ack_trigger(struct xe_eudebug_debugger *d,
+				      struct prelim_drm_xe_eudebug_event *e)
+{
+	struct prelim_drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
+
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
 		if (random() & 1) {
 			struct prelim_drm_xe_eudebug_vm_open vo = { 0, };
-			uint32_t v = 0xc1c1c1c1;
-
+			struct prelim_drm_xe_eudebug_event_vm_bind_op *eo;
 			struct prelim_drm_xe_eudebug_event_vm_bind *eb;
+			uint32_t v = 0xc1c1c1c1;
 			int fd, delta, r;
 
-			igt_debug("vm bind op event received with ref %lld, addr 0x%llx, range 0x%llx\n",
-				  eo->vm_bind_ref_seqno, eo->addr, eo->range);
+			eo = vm_bind_clear_find_op_event_by_ref(d->log,
+								ef->vm_bind_ref_seqno);
+			igt_assert(eo);
+
+			if (!vm_bind_clear_is_tagged_clean_bind(d->log,
+							       ef->vm_bind_ref_seqno))
+				goto ack_ufence;
 
 			eb = (struct prelim_drm_xe_eudebug_event_vm_bind *)
-				xe_eudebug_event_log_find_seqno(d->log, eo->vm_bind_ref_seqno);
+				xe_eudebug_event_log_find_seqno(d->log, ef->vm_bind_ref_seqno);
 			igt_assert(eb);
 
 			vo.client_handle = eb->client_handle;
@@ -2448,18 +2544,9 @@ static void vm_bind_clear_test_trigger(struct xe_eudebug_debugger *d,
 
 			close(fd);
 		}
-		priv->bind_count++;
 	}
 
-	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY)
-		priv->unbind_count++;
-}
-
-static void vm_bind_clear_ack_trigger(struct xe_eudebug_debugger *d,
-				      struct prelim_drm_xe_eudebug_event *e)
-{
-	struct prelim_drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
-
+ack_ufence:
 	xe_eudebug_ack_ufence(d->fd, ef);
 }
 
