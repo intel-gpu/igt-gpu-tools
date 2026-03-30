@@ -2743,6 +2743,32 @@ test_enable_disable(const struct drm_xe_oa_unit *oau)
 	get_stream_status(stream_fd);
 	igt_assert_eq(ret, sizeof(buf));
 
+	/* Wait again for more reports */
+	pollfd.fd = stream_fd;
+	pollfd.events = POLLIN;
+	poll(&pollfd, 1, -1);
+	igt_assert(pollfd.revents & POLLIN);
+
+	do_ioctl(stream_fd, DRM_XE_OBSERVATION_IOCTL_DISABLE, 0);
+
+	/*
+	 * Ensure some reports can be read even with disabled stream. These
+	 * can be less than WAIT_NUM_REPORTS, if pollin was left set in the
+	 * kernel after the previous read (since read buffer is small)
+	 */
+	while ((ret = read(stream_fd, buf, sizeof(buf))) < 0 && errno == EINTR)
+		;
+	get_stream_status(stream_fd);
+	igt_assert_lt(0, ret);
+
+	/* In non-blocking mode read till we see a -EAGAIN, signifying all available data is read */
+	set_fd_flags(stream_fd, O_CLOEXEC | O_NONBLOCK);
+	while ((ret = read(stream_fd, buf, sizeof(buf))) > 0 ||
+	       (ret == -1 && (errno == EINTR || errno == EIO)))
+		;
+	igt_assert_eq(ret, -1);
+	igt_assert_eq(errno, EAGAIN);
+
 	__perf_close(stream_fd);
 }
 
