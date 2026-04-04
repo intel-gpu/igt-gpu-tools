@@ -279,7 +279,7 @@ __xe3p_gpgpu_execfunc(struct intel_bb *ibb,
 
 	engine = explicit_engine ? ring : I915_EXEC_DEFAULT;
 
-	intel_bb_exec(ibb, engine | I915_EXEC_NO_RELOC, false, true);
+	intel_bb_exec(ibb, engine | I915_EXEC_NO_RELOC, false, shdr->bb_sync);
 }
 
 static void gpgpu_alloc_gpu_addr(struct intel_bb *ibb, struct intel_buf *target)
@@ -355,6 +355,7 @@ struct gpgpu_shader *gpgpu_shader_create(int fd)
 	shdr->large_grf_mode = false;
 	shdr->simd_size = 16;  /* Default SIMD size */
 	shdr->hw_local_id_generation = false;
+	shdr->bb_sync = true;
 	igt_assert(shdr->code);
 
 	return shdr;
