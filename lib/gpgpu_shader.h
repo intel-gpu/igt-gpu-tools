@@ -38,6 +38,7 @@ struct gpgpu_shader {
 	bool hw_local_id_generation;
 	int grfs_per_thread;
 	int slm_size;
+	bool bb_sync;
 };
 
 struct iga64_template {
