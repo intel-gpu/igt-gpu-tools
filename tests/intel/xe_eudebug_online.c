@@ -132,17 +132,6 @@ static struct intel_buf *create_uc_buf(int fd, int width, int height, uint64_t r
 	return buf;
 }
 
-static int get_maximum_number_of_threads(int fd)
-{
-	uint32_t subslices = xe_hwconfig_lookup_value_u32(fd, INTEL_HWCONFIG_MAX_SUBSLICE);
-	uint32_t eus_per_subslice =
-		xe_hwconfig_lookup_value_u32(fd, INTEL_HWCONFIG_MAX_EU_PER_SUBSLICE);
-	uint32_t threads_per_eu =
-		xe_hwconfig_lookup_value_u32(fd, INTEL_HWCONFIG_NUM_THREADS_PER_EU);
-
-	return subslices * eus_per_subslice * threads_per_eu;
-}
-
 struct online_debug_data {
 	pthread_mutex_t mutex;
 	/* client in */
@@ -215,11 +204,8 @@ static void vm_write_target_u32(struct online_debug_data *data, uint32_t value, 
 
 static int get_number_of_threads(struct online_debug_data *data)
 {
-	if (data->flags & SHADER_PAGEFAULT_ONE_OF_MANY)
+	if (data->flags & (PAGEFAULT_STRESS_TEST | SHADER_PAGEFAULT_ONE_OF_MANY))
 		return xe_query_eu_thread_count(data->drm_fd, 0);
-
-	if (data->flags & (PAGEFAULT_STRESS_TEST))
-		return get_maximum_number_of_threads(data->drm_fd);
 
 	if (data->flags & (SHADER_MIN_THREADS | SHADER_PAGEFAULT))
 		return 16;
