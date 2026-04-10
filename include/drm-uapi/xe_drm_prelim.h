@@ -66,6 +66,24 @@
  */
 
 /*
+ * Default marker for PRELIM values in shared flags/extensions
+ */
+#define PRELIM_DRM_XE_VALUE_INDICATOR		(1 << 16)
+
+/*
+ * Default mask for PRELIM values created by PRELIM_DRM_XE_VALUE_INDICATOR.
+ * The PRELIM value shall be created by:
+ * PRELIM_DRM_XE_VALUE_INDICATOR | value
+ * and 'value' shall be smaller than MASK value.
+ */
+#define PRELIM_DRM_XE_VALUE_MASK		0xffff
+
+/*
+ * Value of the PRELIM flag/extension without PRELIM INDICATOR
+ */
+#define PRELIM_DRM_XE_VALUE(val)		((val) & PRELIM_DRM_XE_VALUE_MASK)
+
+/*
  * IOCTL numbers listed below are reserved, they are taken up by other
  * components. Please add an unreserved ioctl number here to reserve that
  * number.
@@ -75,9 +93,9 @@
  * Copyright © 2023 Intel Corporation
  */
 
-#define PRELIM_DRM_XE_EUDEBUG_CONNECT 0x5f
-#define PRELIM_DRM_XE_DEBUG_METADATA_CREATE 0x5e
-#define PRELIM_DRM_XE_DEBUG_METADATA_DESTROY 0x5d
+#define PRELIM_DRM_XE_EUDEBUG_CONNECT 0x59
+#define PRELIM_DRM_XE_DEBUG_METADATA_CREATE 0x5b
+#define PRELIM_DRM_XE_DEBUG_METADATA_DESTROY 0x5c
 
 #define PRELIM_DRM_IOCTL_XE_EUDEBUG_CONNECT		DRM_IOWR(DRM_COMMAND_BASE + PRELIM_DRM_XE_EUDEBUG_CONNECT, struct prelim_drm_xe_eudebug_connect)
 #define PRELIM_DRM_IOCTL_XE_DEBUG_METADATA_CREATE	 DRM_IOWR(DRM_COMMAND_BASE + PRELIM_DRM_XE_DEBUG_METADATA_CREATE, struct prelim_drm_xe_debug_metadata_create)
@@ -100,9 +118,9 @@ struct prelim_drm_xe_vm_bind_op_ext_attach_debug {
 	__u64 reserved;
 };
 
-#define PRELIM_XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG 0
+#define PRELIM_XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG (PRELIM_DRM_XE_VALUE_INDICATOR)
 
-#define   PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG		2
+#define   PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG		(PRELIM_DRM_XE_VALUE_INDICATOR)
 #define     PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE		(1 << 0)
 
 /*
@@ -169,8 +187,6 @@ struct prelim_drm_xe_debug_metadata_destroy {
 	/** @metadata_id: metadata handle to destroy */
 	__u32 metadata_id;
 };
-
-#include "xe_drm_prelim.h"
 
 /**
  * Do a eudebug event read for a debugger connection.
@@ -369,7 +385,7 @@ struct prelim_drm_xe_eudebug_vm_open {
 	/** @flags: flags */
 	__u64 flags;
 
-#define DRM_XE_EUDEBUG_VM_SYNC_MAX_TIMEOUT_NSECS (10ULL * NSEC_PER_SEC)
+#define PRELIM_DRM_XE_EUDEBUG_VM_SYNC_MAX_TIMEOUT_NSECS (10ULL * NSEC_PER_SEC)
 	/** @timeout_ns: Timeout value in nanoseconds operations (fsync) */
 	__u64 timeout_ns;
 };
