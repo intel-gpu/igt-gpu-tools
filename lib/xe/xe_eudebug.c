@@ -992,7 +992,7 @@ static int xe_eudebug_connect(int fd, pid_t pid, uint32_t flags)
 	};
 	int debugfd;
 
-	debugfd = igt_ioctl(fd, DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
+	debugfd = igt_ioctl(fd, PRELIM_DRM_IOCTL_XE_EUDEBUG_CONNECT, &param);
 
 	if (debugfd < 0)
 		return -errno;
