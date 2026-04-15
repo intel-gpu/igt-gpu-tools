@@ -2,5 +2,5 @@
 # Blocklisting Reload/Unload tests (DKMS, KV6.6) to unblock shard execution
 ###########################################################################
 igt@xe_module_load@unload
-igt@xe_module_load@(many-)?reload
+igt@xe_module_load@(reload(-no-display)?|many-reload)$
 
