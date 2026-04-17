@@ -327,6 +327,18 @@ struct sip_arf_sso {
 	uint32_t resume;
 };
 
+static uint32_t get_thread_space_address(struct online_debug_data *data, int thread)
+{
+	int x = thread % data->w_dim.x, y = thread / data->w_dim.x;
+
+	return 4 * (y * ALIGN(data->w_dim.x, data->w_dim.alignment) + x);
+}
+
+static uint32_t get_shared_space_address(struct online_debug_data *data)
+{
+	return get_thread_space_address(data, data->thread_count);
+}
+
 static void print_sip_arf_dump(struct sip_arf_dump *arf_dump, int x, int y)
 {
 	igt_debug("=========================================================\n");
@@ -405,13 +417,6 @@ static struct dim_t surface_dimensions(int threads)
 	ret.alignment *= SIMD_SIZE;
 
 	return ret;
-}
-
-static uint32_t steering_offset(int threads)
-{
-	struct dim_t w = walker_dimensions(threads);
-
-	return ALIGN(w.x, w.alignment) * w.y * 4;
 }
 
 static struct intel_buf *create_uc_buf(int fd, int width, int height, uint64_t region)
@@ -1365,6 +1370,13 @@ static void save_first_exception_trigger(struct xe_eudebug_debugger *d,
 	pthread_mutex_unlock(&data->mutex);
 }
 
+static void set_steering_flag(struct online_debug_data *data, uint32_t val)
+{
+	igt_debug("Setting steering flag for workload to %#x.\n", val);
+	vm_write_target_u32(data, val, get_shared_space_address(data));
+	fsync(data->vm_fd);
+}
+
 #define MAX_PREEMPT_TIMEOUT 10ull
 static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 					struct drm_xe_eudebug_event *e)
@@ -1425,13 +1437,8 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 		}
 	}
 
-	if (data->flags & (SHADER_LOOP | SHADER_PAGEFAULT)) {
-		uint32_t threads = data->thread_count;
-		uint32_t val = STEERING_END_LOOP;
-
-		vm_write_target_u32(data, val, steering_offset(threads));
-		fsync(data->vm_fd);
-	}
+	if (data->flags & (SHADER_LOOP | SHADER_PAGEFAULT))
+		set_steering_flag(data, STEERING_END_LOOP);
 	pthread_mutex_unlock(&data->mutex);
 
 	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, att->client_handle,
@@ -1494,8 +1501,7 @@ static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
 			     "Some threads were not affected by interrupt request!\n");
 		free(target);
 
-		vm_write_target_u32(data, STEERING_END_LOOP, steering_offset(threads));
-		fsync(data->vm_fd);
+		set_steering_flag(data, STEERING_END_LOOP);
 
 		eu_ctl_unlock(d->fd, es->client_handle,
 			      es->exec_queue_handle, es->lrc_handle);
@@ -1587,8 +1593,7 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 		val = data->steps_done < 2 ? STEERING_SINGLE_STEP : STEERING_CONTINUE;
 	}
 
-	vm_write_target_u32(data, val, steering_offset(threads));
-	fsync(data->vm_fd);
+	set_steering_flag(data, val);
 
 	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, att->client_handle,
 						    att->exec_queue_handle, att->lrc_handle,
@@ -1659,8 +1664,8 @@ static void sync_host_resume_single_step_trigger(struct xe_eudebug_debugger *d,
 						 struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
-	const int threads = get_number_of_threads(d->ptr);
 	struct online_debug_data *data = d->ptr;
+	const int threads = data->thread_count;
 	uint32_t val;
 
 	igt_assert(d->flags & TRIGGER_RESUME_PARALLEL_WALK);
@@ -1696,9 +1701,7 @@ static void sync_host_resume_single_step_trigger(struct xe_eudebug_debugger *d,
 
 	val = data->steps_done < SINGLE_STEP_COUNT ? STEERING_SINGLE_STEP :
 							     STEERING_CONTINUE;
-
-	vm_write_target_u32(data, val, steering_offset(threads));
-	fsync(data->vm_fd);
+	set_steering_flag(data, val);
 
 	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, es->client_handle,
 						    es->exec_queue_handle, es->lrc_handle,
@@ -2722,13 +2725,6 @@ static uint32_t attn_to_sr0_0(struct online_debug_data *data, int att_nr)
 	return tid + (eu << 4) + (ss << 8) + (sl << (extended ? 14 : 11));
 }
 
-static uint32_t get_thread_space_address(struct online_debug_data *data, int thread)
-{
-	int x = thread % data->w_dim.x, y = thread / data->w_dim.x;
-
-	return data->target_offset + 4 * (y * ALIGN(data->w_dim.x, data->w_dim.alignment) + x);
-}
-
 static void pagefault_trigger(struct xe_eudebug_debugger *d,
 			      struct drm_xe_eudebug_event *e)
 {
@@ -3373,11 +3369,8 @@ static void test_interrupt_all(int fd, struct drm_xe_engine_class_instance *hwe,
 	pthread_mutex_unlock(&data->mutex);
 
 	/* Mainly for negative testcase, try to terminate cleanly when exception did not arrive. */
-	if (wait_for_exception(data, STARTUP_TIMEOUT_MS)) {
-		vm_write_target_u32(data, STEERING_END_LOOP, steering_offset(data->thread_count));
-		fsync(data->vm_fd);
-	}
-
+	if (wait_for_exception(data, STARTUP_TIMEOUT_MS))
+		set_steering_flag(data, STEERING_END_LOOP);
 	xe_eudebug_client_wait_done(s->client);
 
 	xe_eudebug_debugger_stop_worker(s->debugger);
@@ -4214,8 +4207,7 @@ static void test_interrupt_one_of_many_contexts(int *fd)
 	for (i = 0; i < n; i++) {
 		struct drm_xe_eudebug_event *event = NULL;
 
-		vm_write_target_u32(data[i], STEERING_END_LOOP, steering_offset(data[i]->thread_count));
-		fsync(data[i]->vm_fd);
+		set_steering_flag(data[i], STEERING_END_LOOP);
 
 		xe_eudebug_client_wait_done(s[i]->client);
 		xe_eudebug_debugger_stop_worker(s[i]->debugger);
