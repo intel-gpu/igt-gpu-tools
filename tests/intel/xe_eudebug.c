@@ -733,13 +733,14 @@ static void test_connect_user(int fd)
 				/* wait with exit */
 				igt_assert(read(p2[0], &pid, sizeof(pid)) == sizeof(pid));
 			} else {
+				newfd = drm_open_driver(DRIVER_XE);
+
 				if (test[i].u[P_GDB])
 					switch_user(test[i].u[P_GDB], test[i].g[P_GDB]);
 
 				igt_assert(read(p1[0], &pid, sizeof(pid)) == sizeof(pid));
 				param.pid = pid;
 
-				newfd = drm_open_driver(DRIVER_XE);
 				ret = __debug_connect(newfd, &debugfd, &param);
 
 				/* Release the app first */
