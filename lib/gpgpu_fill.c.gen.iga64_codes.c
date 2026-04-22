@@ -3,7 +3,7 @@
 
 #include "gpgpu_shader.h"
 
-#define MD5_SUM_IGA64_ASMS 50a6ea7d435db3bab74c742ce25265c0
+#define MD5_SUM_IGA64_ASMS 08dead8ad077be0af08ea3596fed4a3a
 
 struct iga64_template const iga64_code_xe3p_gpgpu_fill[] = {
 	{ .gfx_ver = 3500, .size = 144, .code = (const uint32_t []) {
