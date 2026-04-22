@@ -464,7 +464,7 @@ static uint64_t wait_from_client(struct xe_eudebug_client *c, const uint64_t tok
 {
 	uint64_t ret = 0;
 
-	igt_debug("debugger: %d waiting for token '%s'\n", getpid(), token_to_str(token));
+	igt_debug("debugger: %d waiting for token '%s' from %d\n", getpid(), token_to_str(token), c->pid);
 
 	ret = __wait_token(c->p_out, token, c->timeout_ms);
 	if (ret == DEAD_CLIENT)
