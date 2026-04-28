@@ -3829,9 +3829,19 @@ int igt_main()
 		test_basic_online_for_e64(fd, hwe, SHADER_PAGEFAULT_ATOMIC_WRITE);
 
 	test_gt_render_or_compute("pagefault-read-stress", fd, hwe)
-		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_READ | PAGEFAULT_STRESS_TEST);
+		if (gen < 35)
+			test_pagefault_online(fd, hwe,
+					      SHADER_PAGEFAULT_READ | PAGEFAULT_STRESS_TEST);
+		else
+			test_basic_online_for_e64(fd, hwe,
+						  SHADER_PAGEFAULT_READ | PAGEFAULT_STRESS_TEST);
 	test_gt_render_or_compute("pagefault-write-stress", fd, hwe)
-		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_WRITE | PAGEFAULT_STRESS_TEST);
+		if (gen < 35)
+			test_pagefault_online(fd, hwe,
+					      SHADER_PAGEFAULT_WRITE | PAGEFAULT_STRESS_TEST);
+		else
+			test_basic_online_for_e64(fd, hwe,
+						  SHADER_PAGEFAULT_WRITE | PAGEFAULT_STRESS_TEST);
 	test_gt_render_or_compute("pagefault-one-of-many", fd, hwe)
 		test_pagefault_online(fd, hwe, SHADER_PAGEFAULT_ONE_OF_MANY);
 
