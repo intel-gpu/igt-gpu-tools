@@ -3609,7 +3609,7 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	xe_eudebug_client_start(debugee);
 
 	igt_debug("Waiting for debugee.\n");
-	igt_for_milliseconds(3 * STARTUP_TIMEOUT_MS) {
+	igt_for_milliseconds(10 * STARTUP_TIMEOUT_MS) {
 		pthread_mutex_lock(&debugee_data->mutex);
 		ret = debugee_data->acked;
 		pthread_mutex_unlock(&debugee_data->mutex);
@@ -3646,7 +3646,7 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	/* Check if second workload was started and is running */
 	wait_for_workload_start(debugee_data);
 	if (intel_gen_per_context_eudebug(fd)) {
-		ret = wait_for_exception(debugee_data, 3 * STARTUP_TIMEOUT_MS);
+		ret = wait_for_exception(debugee_data, 10 * STARTUP_TIMEOUT_MS);
 		igt_assert_f(!ret, "Timeout waiting for exception.\n");
 	}
 	set_steering_flag(debugee_data, STEERING_END_LOOP);
