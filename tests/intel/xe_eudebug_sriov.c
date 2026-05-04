@@ -71,7 +71,12 @@ static void test_deny_eudebug(int fd)
 
 	sysfs = igt_sysfs_open(fd);
 	igt_assert_fd(sysfs);
-	igt_assert_eq(igt_sysfs_printf(sysfs, "device/prelim_enable_eudebug", "1"), -EPERM);
+	/*
+	 * Enabling eudebug while VFs are already active must fail with -EBUSY,
+	 * as the kernel lockdown guard rejects the request when VF enabling
+	 * is in progress or VFs are enabled (xe_sriov_pf_lockdown()).
+	 */
+	igt_assert_eq(igt_sysfs_printf(sysfs, "device/prelim_enable_eudebug", "1"), -EBUSY);
 	close(sysfs);
 }
 
