@@ -1,6 +1,4 @@
 ###########################################################################
-# Blocklisting Reload/Unload tests (DKMS, KV6.6) to unblock shard execution
+# NO_COMPRESSION is not supported on xekmd-backports-6.17 / Xe DKMS KV6.6.
 ###########################################################################
-igt@xe_module_load@unload
-igt@xe_module_load@(reload(-no-display)?|many-reload)$
-
+igt@xe_pat@bo-comp-disable-bind
