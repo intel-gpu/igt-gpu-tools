@@ -1763,7 +1763,6 @@ struct xe_eudebug_session *xe_eudebug_session_create(int fd,
 
 	s->client = xe_eudebug_client_create(fd, work, flags, test_private);
 	s->debugger = xe_eudebug_debugger_create(fd, flags, test_private);
-	s->flags = flags;
 
 	return s;
 }
