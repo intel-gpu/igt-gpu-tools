@@ -77,7 +77,6 @@ struct xe_eudebug_client {
 };
 
 struct xe_eudebug_session {
-	uint64_t flags;
 	struct xe_eudebug_client *client;
 	struct xe_eudebug_debugger *debugger;
 };
