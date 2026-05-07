@@ -1278,7 +1278,7 @@ static void *debugger_worker_loop(void *data)
 				xe_eudebug_event_log_write(d->log, e);
 				debugger_run_triggers(d, e);
 			} else {
-				igt_info("xe_eudebug_read_event returned %d\n", ret);
+				igt_debug("xe_eudebug_read_event returned %d\n", err);
 			}
 		}
 	} while ((ret && READ_ONCE(d->worker_state) == DEBUGGER_WORKER_QUITTING) ||
