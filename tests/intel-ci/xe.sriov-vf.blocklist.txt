@@ -10,7 +10,8 @@ igt@xe_module_load@.*
 #
 igt@sriov_basic.*
 igt@xe_eudebug_sriov.*
-igt@xe_pmu@.*fn-engine-activity.*
+igt@xe_pmu@.*engine-activity-.*
+igt@xe_pmu@gt-c6-idle
 igt@xe_sriov.*
 #
 # display related tests
@@ -57,3 +58,12 @@ igt@xe_pmu@gt-frequency
 # The feature query_cs_cycles is not supported on VF
 #
 igt@xe_query@.*cs-cycles
+#
+# survivability mode is not supported in VF.
+#
+igt@xe_configfs@survivability-mode
+igt@xe_survivability@.*
+#
+# HWMON is not supported inside VF.
+#
+igt@intel_hwmon@hwmon-(read|write)
