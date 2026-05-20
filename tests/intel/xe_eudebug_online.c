@@ -141,6 +141,11 @@ struct online_debug_data {
 		uint64_t *thread_last_aip;
 	} sso;
 	bool acked;
+	enum {
+		STEERING_CONTROL_NONE,
+		STEERING_CONTROL_LOOP,
+		STEERING_CONTROL_END_LOOP,
+	} steering_control;
 };
 
 struct sip_arf_dump {
@@ -2325,10 +2330,31 @@ static void run_online_client(struct xe_eudebug_client *c)
 	sip = get_sip(data);
 
 	igt_nsec_elapsed(&ts);
+
+	if (data->steering_control == STEERING_CONTROL_LOOP)
+		shader->bb_sync = false;
+
 	gpgpu_shader_exec(ibb, buf, w_dim.x, w_dim.y, shader, sip, 0, 0);
 
 	gpgpu_shader_destroy(sip);
 	gpgpu_shader_destroy(shader);
+
+	if (data->steering_control == STEERING_CONTROL_LOOP) {
+		uint32_t *steering;
+		bool end_loop;
+
+		do {
+			usleep(10000);
+			pthread_mutex_lock(&data->mutex);
+			end_loop = data->steering_control == STEERING_CONTROL_END_LOOP;
+			pthread_mutex_unlock(&data->mutex);
+		} while (!end_loop);
+
+		ptr = xe_bo_mmap_ext(fd, buf->handle, buf->size, PROT_WRITE);
+		steering = ptr + get_shared_space_address(data) / sizeof(*ptr);
+		*steering = STEERING_END_LOOP;
+		munmap(ptr, buf->size);
+	}
 
 	intel_bb_sync(ibb);
 
@@ -3571,6 +3597,10 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	int ret;
 
 	data = online_debug_data_create(fd, hwe, flags);
+
+	if (intel_gen_per_context_eudebug(fd))
+		data->steering_control = STEERING_CONTROL_LOOP;
+
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
@@ -3628,7 +3658,9 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 		       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
 		       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
 		ret = wait_for_exception(data, STARTUP_TIMEOUT_MS);
-		set_steering_flag(data, STEERING_END_LOOP);
+		pthread_mutex_lock(&data->mutex);
+		data->steering_control = STEERING_CONTROL_END_LOOP;
+		pthread_mutex_unlock(&data->mutex);
 		igt_assert_f(ret, "Exception arrived for wrong context.\n");
 	} else {
 		/*
