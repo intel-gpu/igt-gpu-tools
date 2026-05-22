@@ -563,6 +563,7 @@ void gpgpu_shader__wait(struct gpgpu_shader *shdr)
 void gpgpu_shader__nop(struct gpgpu_shader *shdr)
 {
 	emit_iga64_code(shdr, nop, R"(
+#define IGA64_FLAGS ""
 (W)	nop
 	)");
 }
