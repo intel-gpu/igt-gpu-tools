@@ -62,7 +62,6 @@ igt@xe_pm@d3hot-i2c
 # Expected skip for the platform as the tests need more than
 # one CCS engine
 ##################################################################
-igt@xe_compute@ccs-mode-basic
 igt@xe_compute@ccs-mode-compute-kernel
 #################################################################
 # Tests not applicable for the platform
