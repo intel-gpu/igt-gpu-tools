@@ -74,5 +74,3 @@ igt@xe_pm@d3hot-i2c
 # Hugepages tests needs extra setting in CI
 # echo 128 >  /proc/sys/vm/nr_hugepages
 ##################################################################
-igt@xe_exec_system_allocator@.*huge.*
-##################################################################

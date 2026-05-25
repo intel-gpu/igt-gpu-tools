@@ -37,7 +37,6 @@ igt@xe_pat@pat-index-xehpc
 igt@xe_pat@pat-index-xelp
 igt@xe_pat@pat-index-xelpg
 igt@xe_media_fill@media-fill
-igt@xe_compute@ccs-mode-basic
 igt@xe_configfs@survivability-mode
 ##################################################################
 # Features not supported for integrated platforms
@@ -70,10 +69,6 @@ igt@xe_pm_residency@toggle-gt-c6
 ##################################################################
 igt@xe_pxp@.*
 igt@xe_fault_injection@exec-queue-create-fail-xe_pxp_exec_queue_add
-##################################################################
-# System allocator feature is not POR for PTL
-##################################################################
-igt@xe_exec_system_allocator@.*
 ##################################################################
 # survivability feature not applicable for PTL
 ##################################################################

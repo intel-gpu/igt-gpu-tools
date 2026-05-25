@@ -1,0 +1,10 @@
+##################################################################
+# System allocator feature is not supported in the XeKMD backport
+# kernel (KV6.17).
+#####################################################################
+igt@xe_exec_system_allocator@.*
+igt@xe_svm_usrptr_madvise@.*
+igt@xe_pat@.*svm.*
+igt@xe_prefetch_fault@.*svm
+igt@xe_multigpu_svm@.*
+######################################################################
