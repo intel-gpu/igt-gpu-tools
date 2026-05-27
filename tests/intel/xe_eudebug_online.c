@@ -177,6 +177,41 @@ struct online_debug_data {
 	bool acked;
 };
 
+static void vm_read(int fd, void *ptr, size_t count, off_t offset)
+{
+	igt_assert(fd >= 0);
+	igt_assert_eq(pread(fd, ptr, count, offset), count);
+}
+
+static void vm_write(int fd, void *ptr, size_t count, off_t offset)
+{
+	igt_assert(fd >= 0);
+	igt_assert_eq(pwrite(fd, ptr, count, offset), count);
+}
+
+static void vm_read_target(struct online_debug_data *data, void *ptr, size_t count, off_t offset)
+{
+	vm_read(data->vm_fd, ptr, count, data->target_offset + offset);
+}
+
+static void vm_write_target(struct online_debug_data *data, void *ptr, size_t count, off_t offset)
+{
+	vm_write(data->vm_fd, ptr, count, data->target_offset + offset);
+}
+
+static uint32_t vm_read_target_u32(struct online_debug_data *data, off_t offset)
+{
+	uint32_t ret;
+
+	vm_read_target(data, &ret, sizeof(ret), offset);
+	return ret;
+}
+
+static void vm_write_target_u32(struct online_debug_data *data, uint32_t value, off_t offset)
+{
+	vm_write_target(data, &value, sizeof(value), offset);
+}
+
 static int get_number_of_threads(struct online_debug_data *data)
 {
 	if (data->flags & SHADER_PAGEFAULT_ONE_OF_MANY)
@@ -474,7 +509,6 @@ static void online_debug_data_destroy(struct online_debug_data *data)
 
 static void wait_for_workloads_start(struct online_debug_data **data, int n)
 {
-	int val;
 	int count;
 	bool acked;
 
@@ -487,9 +521,7 @@ static void wait_for_workloads_start(struct online_debug_data **data, int n)
 			if (!acked)
 				continue;
 
-			if (pread(data[i]->vm_fd, &val, sizeof(val),
-				  data[i]->target_offset) == sizeof(val) &&
-			    val != 0)
+			if (vm_read_target_u32(data[i], 0) != 0)
 				count++;
 		}
 
@@ -584,7 +616,7 @@ static uint32_t find_kernel_in_bb(struct gpgpu_shader *kernel,
 
 	buf = malloc(data->bb_size);
 
-	igt_assert_eq(pread(data->vm_fd, buf, data->bb_size, data->bb_offset), data->bb_size);
+	vm_read(data->vm_fd, buf, data->bb_size, data->bb_offset);
 
 	ptr = memmem(buf, data->bb_size, p, kernel->size * sizeof(uint32_t));
 	igt_assert(ptr);
@@ -618,11 +650,9 @@ static bool set_breakpoint_once(struct xe_eudebug_debugger *d,
 
 		/* set breakpoint on last instruction */
 		aip = data->kernel_offset + kernel->size * 4 - 0x10;
-		igt_assert_eq(pread(data->vm_fd, &instr_usdw, sz,
-				    data->bb_offset + aip), sz);
+		vm_read(data->vm_fd, &instr_usdw, sz, data->bb_offset + aip);
 		instr_usdw |= breakpoint_bit;
-		igt_assert_eq(pwrite(data->vm_fd, &instr_usdw, sz,
-				     data->bb_offset + aip), sz);
+		vm_write(data->vm_fd, &instr_usdw, sz, data->bb_offset + aip);
 		fsync(data->vm_fd);
 
 		breakpoint_set = true;
@@ -646,13 +676,13 @@ static void get_aips_offset_table(struct online_debug_data *data, int threads)
 	data->aips_offset_table = malloc(threads * sizeof(uint64_t));
 	igt_assert(data->aips_offset_table);
 
-	igt_assert_eq(pread(data->vm_fd, &first_aip, sz, data->target_offset), sz);
+	first_aip = vm_read_target_u32(data, 0);
 	data->first_aip = first_aip;
 	data->aips_offset_table[table_index++] = 0;
 
 	fsync(data->vm_fd);
 	for (int i = sz; i < data->target_size; i += sz) {
-		igt_assert_eq(pread(data->vm_fd, &aip, sz, data->target_offset + i), sz);
+		aip = vm_read_target_u32(data, i);
 		if (aip == first_aip)
 			data->aips_offset_table[table_index++] = i;
 	}
@@ -667,13 +697,11 @@ static void get_aips_offset_table(struct online_debug_data *data, int threads)
 static int get_stepped_threads_count(struct online_debug_data *data, int threads)
 {
 	int count = 0;
-	size_t sz = sizeof(uint32_t);
 	uint32_t aip;
 
 	fsync(data->vm_fd);
 	for (int i = 0; i < threads; i++) {
-		igt_assert_eq(pread(data->vm_fd, &aip, sz,
-				    data->target_offset + data->aips_offset_table[i]), sz);
+		aip = vm_read_target_u32(data, data->aips_offset_table[i]);
 		if (aip != data->first_aip) {
 			igt_assert(aip == data->first_aip + 0x10);
 			count++;
@@ -749,8 +777,7 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 			kernel = get_shader(data);
 			expected = data->kernel_offset + kernel->size * 4 - 0x10;
 
-			igt_assert_eq(pread(data->vm_fd, &aip, sizeof(aip),
-					    data->target_offset), sizeof(aip));
+			aip = vm_read_target_u32(data, 0);
 			igt_assert_eq_u32(aip, expected);
 
 			gpgpu_shader_destroy(kernel);
@@ -761,9 +788,7 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 		uint32_t threads = data->thread_count;
 		uint32_t val = STEERING_END_LOOP;
 
-		igt_assert_eq(pwrite(data->vm_fd, &val, sizeof(uint32_t),
-				     data->target_offset + steering_offset(threads)),
-			      sizeof(uint32_t));
+		vm_write_target_u32(data, val, steering_offset(threads));
 		fsync(data->vm_fd);
 	}
 	pthread_mutex_unlock(&data->mutex);
@@ -782,7 +807,6 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 	struct online_debug_data *data = d->ptr;
 	const int threads = data->thread_count;
 	uint32_t val;
-	size_t sz = sizeof(uint32_t);
 
 	get_aips_offset_table(data, threads);
 
@@ -857,8 +881,7 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 		val = data->steps_done < 2 ? STEERING_SINGLE_STEP : STEERING_CONTINUE;
 	}
 
-	igt_assert_eq(pwrite(data->vm_fd, &val, sz,
-			     data->target_offset + steering_offset(threads)), sz);
+	vm_write_target_u32(data, val, steering_offset(threads));
 	fsync(data->vm_fd);
 
 	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, att->client_handle,
@@ -984,14 +1007,11 @@ static void overwrite_immediate_value_in_common_target_write(int vm_fd, uint64_t
 		igt_assert_eq(pread(vm_fd, &val, sizeof(uint32_t), addr), sizeof(uint32_t));
 		if (val == old_val) {
 			igt_debug("val_before_write[%d]: %08x\n", vals_changed, val);
-			igt_assert_eq(pwrite(vm_fd, &new_val, sizeof(uint32_t), addr),
-				      sizeof(uint32_t));
-			igt_assert_eq(pread(vm_fd, &val, sizeof(uint32_t), addr),
-				      sizeof(uint32_t));
+			vm_write(vm_fd, &new_val, sizeof(new_val), addr);
+			vm_read(vm_fd, &val, sizeof(val), addr);
 			igt_debug("val_before_fsync[%d]: %08x\n", vals_changed, val);
 			fsync(vm_fd);
-			igt_assert_eq(pread(vm_fd, &val, sizeof(uint32_t), addr),
-				      sizeof(uint32_t));
+			vm_read(vm_fd, &val, sizeof(val), addr);
 			igt_debug("val_after_fsync[%d]: %08x\n", vals_changed, val);
 			igt_assert_eq_u32(val, new_val);
 			vals_changed++;
@@ -1008,7 +1028,6 @@ static void eu_attention_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	struct dim_t s_dim = surface_dimensions(data->thread_count);
 	uint32_t *kernel_offset = &data->kernel_offset;
 	int *counter = &data->att_event_counter;
-	int val;
 	uint32_t instr_usdw;
 	struct gpgpu_shader *kernel;
 	const uint32_t breakpoint_bit = 1 << 30;
@@ -1035,15 +1054,13 @@ static void eu_attention_resume_caching_trigger(struct xe_eudebug_debugger *d,
 
 	/* set breakpoint on next write instruction */
 	if (*counter < instruction_count) {
-		igt_assert_eq(pread(data->vm_fd, &instr_usdw, sizeof(instr_usdw),
-				    data->bb_offset + *kernel_offset + shader_preamble->size * 4 +
-				    shader_write_instr->size * 4 * *counter),
-				    sizeof(instr_usdw));
+		vm_read(data->vm_fd, &instr_usdw, sizeof(instr_usdw),
+			data->bb_offset + *kernel_offset + shader_preamble->size * 4 +
+			shader_write_instr->size * 4 * *counter);
 		instr_usdw |= breakpoint_bit;
-		igt_assert_eq(pwrite(data->vm_fd, &instr_usdw, sizeof(instr_usdw),
-				     data->bb_offset + *kernel_offset + shader_preamble->size * 4 +
-				     shader_write_instr->size * 4 * *counter),
-				     sizeof(instr_usdw));
+		vm_write(data->vm_fd, &instr_usdw, sizeof(instr_usdw),
+			 data->bb_offset + *kernel_offset + shader_preamble->size * 4 +
+			 shader_write_instr->size * 4 * *counter);
 		fsync(data->vm_fd);
 	}
 
@@ -1070,12 +1087,9 @@ static void eu_attention_resume_caching_trigger(struct xe_eudebug_debugger *d,
 
 	/* check surface at each breakpoint that is after write instruction */
 	if (*counter > 1 && *counter <= instruction_count + 1)
-		for (int i = 0; i < data->target_size; i += sizeof(uint32_t)) {
-			igt_assert_eq(pread(data->vm_fd, &val, sizeof(val),
-					    data->target_offset + i), sizeof(val));
-			igt_assert_f(val != CACHING_POISON_VALUE,
+		for (int i = 0; i < data->target_size; i += sizeof(uint32_t))
+			igt_assert_f(vm_read_target_u32(data, i) != CACHING_POISON_VALUE,
 				     "Poison value found at %04d!\n", i);
-		}
 
 	ret = __eu_ctl(d->fd, att->client_handle, att->exec_queue_handle, att->lrc_handle,
 		       att->bitmask, &att->bitmask_size, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME,
@@ -1523,7 +1537,7 @@ static void pagefault_trigger(struct xe_eudebug_debugger *d,
 	offset = get_thread_space_address(data, data->pf_thread_number);
 
 	igt_for_milliseconds(500) {
-		igt_assert_eq(pread(data->vm_fd, &sr0_0, sizeof(sr0_0), offset), sizeof(sr0_0));
+		sr0_0 = vm_read_target_u32(data, offset);
 		if (sr0_0)
 			break;
 		usleep(1000);
