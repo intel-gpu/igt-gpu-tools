@@ -3411,6 +3411,142 @@ static void reset_debugger_log(struct xe_eudebug_debugger *d)
 }
 
 /**
+ * SUBTEST: interrupt-other-two-sessions
+ * Functionality: EU control
+ * Description:
+ *	Starts two independent debug sessions on the same GT, each with its own
+ *	debugger and client running a shader loop. Sends an EU interrupt targeting
+ *	the second session's context and verifies that the resulting
+ *	exception event is not delivered to the first session's debugger. Then
+ *	stops the first client to allow the second (debugee) workload to be
+ *	scheduled on the EU, and confirms that the exception is correctly
+ *	delivered to the targeted debugee session.
+ */
+static void test_interrupt_other_two_sessions(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
+{
+	struct online_debug_data *data;
+	struct online_debug_data *debugee_data;
+	struct xe_eudebug_session *s;
+	struct xe_eudebug_session *debugee_s;
+	int ret;
+
+	/* Create first session */
+	data = online_debug_data_create(fd, hwe, flags);
+	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
+
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+					exec_queue_trigger);
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		/* Per context debug */
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_resume_trigger);
+		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						save_first_exception_trigger);
+	}
+
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+					create_metadata_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+					ufence_ack_trigger);
+
+	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
+	xe_eudebug_debugger_start_worker(s->debugger);
+	xe_eudebug_client_start(s->client);
+
+	wait_for_workload_start(data);
+	igt_debug("First client workload started.\n");
+
+	/* Create second session */
+	debugee_data = online_debug_data_create(fd, hwe, flags);
+	debugee_s = xe_eudebug_session_create(fd, run_online_client, flags, debugee_data);
+
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+					exec_queue_trigger);
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		/* Per context debug */
+		xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_debug_trigger);
+		xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						sync_host_resume_trigger);
+		xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+						save_first_exception_trigger);
+	}
+
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+					create_metadata_trigger);
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+					ufence_ack_trigger);
+
+	igt_assert_eq(xe_eudebug_debugger_attach(debugee_s->debugger, debugee_s->client), 0);
+	xe_eudebug_debugger_start_worker(debugee_s->debugger);
+	xe_eudebug_client_start(debugee_s->client);
+
+	/* Wait for debugee submission to be acked */
+	igt_for_milliseconds(10 * STARTUP_TIMEOUT_MS) {
+		pthread_mutex_lock(&debugee_data->mutex);
+		ret = debugee_data->acked;
+		pthread_mutex_unlock(&debugee_data->mutex);
+		if (ret)
+			break;
+		usleep(10000);
+	}
+	igt_assert_f(ret, "Timeout waiting for debugee workload submission.\n");
+	igt_debug("Second client started.\n");
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		/*
+		 * eu_ctl should succeed, workload will be interrupted once it will be scheduled,
+		 * ie. after end of previous runalone workload.
+		 */
+		eu_ctl(debugee_s->debugger->fd, debugee_data->client_handle,
+		       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
+		       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
+		ret = wait_for_exception(data, STARTUP_TIMEOUT_MS);
+		set_steering_flag(data, STEERING_END_LOOP);
+		igt_assert_f(ret, "Exception arrived for wrong context.\n");
+	} else {
+		/*
+		 * Interrupting the other client should return invalid state
+		 * as it is running in runalone mode
+		 */
+		igt_assert_eq(__eu_ctl(debugee_s->debugger->fd, debugee_data->client_handle,
+				       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
+				       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
+		xe_force_gt_reset_async(s->debugger->master_fd, debugee_data->hwe.gt_id);
+	}
+
+	igt_debug("Waiting for first client to finish.\n");
+	xe_eudebug_client_wait_done(s->client);
+	igt_debug("First client finished.\n");
+
+	/* Check if second workload was started and is running */
+	wait_for_workload_start(debugee_data);
+	igt_debug("Workload started in debugee.\n");
+
+	if (intel_gen_per_context_eudebug(fd)) {
+		ret = wait_for_exception(debugee_data, 10 * STARTUP_TIMEOUT_MS);
+		igt_assert_f(!ret, "Timeout waiting for exception.\n");
+	}
+	set_steering_flag(debugee_data, STEERING_END_LOOP);
+	xe_eudebug_client_wait_done(debugee_s->client);
+	xe_eudebug_debugger_stop_worker(s->debugger);
+	xe_eudebug_debugger_stop_worker(debugee_s->debugger);
+
+	xe_eudebug_session_destroy(s);
+	xe_eudebug_session_destroy(debugee_s);
+	online_debug_data_destroy(data);
+	online_debug_data_destroy(debugee_data);
+}
+
+/**
  * SUBTEST: interrupt-other-debuggable
  * Functionality: EU control
  * Description:
@@ -4360,6 +4496,9 @@ int igt_main()
 
 	test_gt_render_or_compute("interrupt-all", fd, hwe)
 		test_interrupt_all(fd, hwe, SHADER_LOOP);
+
+	test_gt_render_or_compute("interrupt-other-two-sessions", fd, hwe)
+		test_interrupt_other_two_sessions(fd, hwe, SHADER_LOOP);
 
 	test_gt_render_or_compute("interrupt-other-debuggable", fd, hwe)
 		test_interrupt_other(fd, hwe, SHADER_LOOP);
