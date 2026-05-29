@@ -3455,7 +3455,7 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 	xe_eudebug_debugger_detach(s->debugger);
 	reset_debugger_log(s->debugger);
 
-	debugee_data = online_debug_data_create(fd, hwe, flags);
+	debugee_data = online_debug_data_create(fd, hwe, debugee_flags);
 	s->debugger->ptr = debugee_data;
 	debugee = xe_eudebug_client_create(fd, run_online_client, debugee_flags, debugee_data);
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, debugee), 0);
