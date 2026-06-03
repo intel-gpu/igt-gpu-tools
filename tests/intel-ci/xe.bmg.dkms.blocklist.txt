@@ -2,3 +2,13 @@
 # NO_COMPRESSION is not supported on xekmd-backports-6.17 / Xe DKMS KV6.6.
 ###########################################################################
 igt@xe_pat@bo-comp-disable-bind
+##################################################################
+# System allocator feature is not supported in the XeKMD backport
+# kernel KV6.17 / Xe DKMS KV6.6.
+#####################################################################
+igt@xe_exec_system_allocator@.*
+igt@xe_svm_usrptr_madvise@.*
+igt@xe_pat@.*svm.*
+igt@xe_prefetch_fault@.*svm
+igt@xe_multigpu_svm@.*
+######################################################################
