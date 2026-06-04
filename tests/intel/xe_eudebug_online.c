@@ -1100,6 +1100,7 @@ online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, u
 {
 	const struct intel_device_info *info;
 	struct online_debug_data *data;
+	pthread_mutexattr_t attr;
 
 	data = mmap(0, ALIGN(sizeof(*data), PAGE_SIZE),
 		    PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
@@ -1109,7 +1110,16 @@ online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, u
 	memcpy(&data->hwe, hwe, sizeof(*hwe));
 	data->flags = flags;
 	data->thread_count = get_number_of_threads(data);
-	pthread_mutex_init(&data->mutex, NULL);
+
+	/*
+	 * data lives in MAP_SHARED memory and is locked by both the debugger
+	 * and the forked client process, so the mutex must be process-shared.
+	 */
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+	pthread_mutex_init(&data->mutex, &attr);
+	pthread_mutexattr_destroy(&attr);
+
 	data->client_handle = -1ULL;
 	data->exec_queue_handle = -1ULL;
 	data->lrc_handle = -1ULL;
@@ -1124,6 +1134,7 @@ online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, u
 
 static void online_debug_data_destroy(struct online_debug_data *data)
 {
+	pthread_mutex_destroy(&data->mutex);
 	free(data->aips_offset_table);
 	munmap(data, ALIGN(sizeof(*data), PAGE_SIZE));
 }
