@@ -139,6 +139,7 @@ struct online_debug_data {
 	struct drm_xe_engine_class_instance hwe;
 	uint64_t flags;
 	int thread_count;
+	uint32_t gfx_ver;
 	/* client out */
 	int thread_hit_count;
 	/* debugger internals */
@@ -497,6 +498,7 @@ static inline uint64_t eu_ctl_unlock(int debugfd, uint64_t client,
 static struct online_debug_data *
 online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
+	const struct intel_device_info *info;
 	struct online_debug_data *data;
 
 	data = mmap(0, ALIGN(sizeof(*data), PAGE_SIZE),
@@ -514,6 +516,8 @@ online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, u
 	data->vm_fd = -1;
 	data->stepped_threads_count = -1;
 	data->w_dim = walker_dimensions(data->thread_count);
+	info = intel_get_device_info(intel_get_drm_devid(drm_fd));
+	data->gfx_ver = 100 * info->graphics_ver + info->graphics_rel;
 
 	return data;
 }
