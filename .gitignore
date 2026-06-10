@@ -1,0 +1,56 @@
+#
+#		X.Org module default exclusion patterns
+#		The next section if for module specific patterns
+#
+#	Do not edit the following section
+# 	Edit Compile Debug Document Distribute
+*~
+*.[0-9]
+*.[0-9]x
+*.bak
+*.bin
+core
+*.dll
+*.exe
+*-ISO*.bdf
+*-JIS*.bdf
+*-KOI8*.bdf
+*.kld
+*.ko
+*.ko.cmd
+*.lai
+*.l[oa]
+*.[oa]
+*.obj
+*.patch
+*.so
+*.pcf.gz
+*.pdb
+*.tar.bz2
+*.tar.gz
+#
+#		Add & Override patterns for xfs
+#
+#		Edit the following section as needed
+# For example, !report.pc overrides *.pc. See 'man gitignore'
+#
+*.swo
+*.swp
+*.dirstamp
+cscope.*
+TAGS
+build-aux/
+__pycache__
+.coverage
+.igt-snapshot.json
+.automation/
+intel-gpu-tools-*/
+igt-gpu-tools-*/
+
+piglit
+results
+build
+patches
+Makefile
+
+.vscode
