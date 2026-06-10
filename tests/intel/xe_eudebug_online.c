@@ -120,14 +120,15 @@ struct online_debug_data {
 	int vm_fd;
 	uint32_t kernel_offset;
 	uint32_t first_aip;
+	uint32_t aip_step;
 	uint64_t *aips_offset_table;
 	uint32_t steps_done;
+	uint32_t instruction_count;
 	uint8_t *single_step_bitmask;
 	int stepped_threads_count;
 	struct timespec exception_arrived;
 	int last_eu_control_seqno;
 	struct drm_xe_eudebug_event *exception_event;
-	int att_event_counter;
 	uint32_t pf_thread_number;
 	int num_threads_per_eu;
 	int max_subslices_per_slice;
@@ -496,19 +497,19 @@ static int get_number_of_threads(struct online_debug_data *data)
 	return 512;
 }
 
-static int caching_get_instruction_count(int fd, uint32_t s_dim__x, uint64_t flags)
+static int caching_get_instruction_count(struct online_debug_data *data)
 {
 	uint64_t memory;
 
-	igt_assert((flags & SHADER_CACHING_SRAM) || (flags & SHADER_CACHING_VRAM));
+	igt_assert(data->flags & (SHADER_CACHING_SRAM | SHADER_CACHING_VRAM));
 
-	if (flags & SHADER_CACHING_SRAM)
-		memory = system_memory(fd);
+	if (data->flags & SHADER_CACHING_SRAM)
+		memory = system_memory(data->drm_fd);
 	else
-		memory = vram_memory(fd, 0);
+		memory = vram_memory(data->drm_fd, 0);
 
 	/* each instruction writes to given y offset */
-	return (2 * xe_min_page_size(fd, memory)) / s_dim__x;
+	return (2 * xe_min_page_size(data->drm_fd, memory)) / surface_dimensions(data->thread_count).x;
 }
 
 static bool intel_gen_per_context_eudebug(int fd)
@@ -826,12 +827,16 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 			gpgpu_shader__breakpoint(shader);
 		}
 	} else if ((data->flags & SHADER_CACHING_SRAM) || (data->flags & SHADER_CACHING_VRAM)) {
-		int  count = caching_get_instruction_count(data->drm_fd, s_dim.x, data->flags);
+		uint32_t first_aip;
 
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__breakpoint(shader);
-		for (int i = 0; i < count; i++)
+		first_aip = shader->size;
+		for (int i = 0; i < data->instruction_count; i++) {
 			gpgpu_shader__common_target_write_u32(shader, s_dim.y + i, CACHING_VALUE(i));
+			if (i == 0)
+				data->aip_step = sizeof(*shader->code) * (shader->size - first_aip);
+		}
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__breakpoint(shader);
 	} else if ((data->flags & SHADER_PAGEFAULT) &&
@@ -2104,117 +2109,123 @@ static void create_metadata_trigger(struct xe_eudebug_debugger *d, struct drm_xe
 		read_metadata(d, em->client_handle, em->metadata_handle, em->type, em->len);
 }
 
-static void overwrite_immediate_value_in_common_target_write(int vm_fd, uint64_t offset,
-							     uint32_t old_val, uint32_t new_val)
+static void
+overwrite_immediate_value_in_common_target_write(struct online_debug_data *data, uint64_t addr,
+						 uint32_t old_val, uint32_t new_val)
 {
-	uint64_t addr = offset;
-	int vals_changed = 0;
-	uint32_t val;
+	uint32_t instr[4], instr_size = sizeof(instr), val, vals_changed = 0;
+	int imm_offset = 96;
 
-	while (vals_changed < 4) {
-		vm_read(vm_fd, &val, sizeof(val), addr);
-		if (val == old_val) {
-			igt_debug("val_before_write[%d]: %08x\n", vals_changed, val);
-			vm_write(vm_fd, &new_val, sizeof(new_val), addr);
-			vm_read(vm_fd, &val, sizeof(val), addr);
-			igt_debug("val_before_fsync[%d]: %08x\n", vals_changed, val);
-			fsync(vm_fd);
-			vm_read(vm_fd, &val, sizeof(val), addr);
-			igt_debug("val_after_fsync[%d]: %08x\n", vals_changed, val);
-			igt_assert_eq_u32(val, new_val);
-			vals_changed++;
-		}
-		addr += sizeof(uint32_t);
+	for (uint64_t end = addr + data->aip_step; addr + instr_size <= end; addr += instr_size) {
+		vm_read(data->vm_fd, instr, instr_size, addr);
+		val = get_bitfield(instr, imm_offset + 31, imm_offset);
+		if (val != old_val)
+			continue;
+		set_bitfield(instr, imm_offset + 31, imm_offset, new_val);
+		vm_write(data->vm_fd, instr, instr_size, addr);
+		fsync(data->vm_fd);
+		vm_read(data->vm_fd, instr, instr_size, addr);
+		val = get_bitfield(instr, imm_offset + 31, imm_offset);
+		igt_assert_eq_u32(val, new_val);
+		vals_changed++;
 	}
+	igt_debug("%s: %#x -> %#x %d times\n", __func__, old_val, new_val, vals_changed);
+	igt_assert_eq(vals_changed, 4);
 }
 
 static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 					     struct drm_xe_eudebug_event *e)
 {
 	struct online_debug_data *data = d->ptr;
-	struct dim_t s_dim = surface_dimensions(data->thread_count);
-	uint32_t *kernel_offset = &data->kernel_offset;
-	int *counter = &data->att_event_counter;
-	uint32_t instr_usdw;
-	struct gpgpu_shader *kernel;
-	const uint32_t breakpoint_bit = 1 << 30;
-	struct gpgpu_shader *shader_preamble;
-	struct gpgpu_shader *shader_write_instr;
-	const unsigned int instruction_count =
-			caching_get_instruction_count(d->master_fd, s_dim.x, data->flags);
-	uint64_t seqno = 0;
+	uint32_t val, cur_ip = 0, next_bp;
+	int cur_instr;
 	int ret;
 
-	if (data->last_eu_control_seqno > e->seqno)
-		return;
+	/* handle every breakpoint only once */
+	if (data->steps_done >= data->instruction_count + 2)
+		goto resume;
 
-	shader_preamble = gpgpu_shader_create(d->master_fd);
-	gpgpu_shader__write_dword(shader_preamble, SHADER_CANARY, 0);
-	gpgpu_shader__nop(shader_preamble);
-	gpgpu_shader__breakpoint(shader_preamble);
+	igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
+		val = vm_read_target_u32(data, get_thread_space_address(data, 0));
+		igt_debug("Waiting for all %d threads stopped at ip %#x\n", data->thread_count, val);
+		for (int i = 1; i < data->thread_count; ++i)
+			if (val != vm_read_target_u32(data, get_thread_space_address(data, i)))
+				goto retry;
+		cur_ip = val;
+		break;
+	retry:
+		usleep(10000);
+	}
+	igt_assert_f(cur_ip, "Timeout waiting for all threads stopped at the same ip(%#x).\n", val);
 
-	shader_write_instr = gpgpu_shader_create(d->master_fd);
-	gpgpu_shader__common_target_write_u32(shader_write_instr, 0, 0);
+	/* On older platforms IPs are relative to Instruction Base Address. Bspec: 56626 */
+	if (data->gfx_ver < 3500)
+		cur_ip += data->bb_offset;
 
-	if (!*kernel_offset) {
-		kernel = get_shader(data);
-		*kernel_offset = find_kernel_in_bb(kernel, data);
-		gpgpu_shader_destroy(kernel);
+	read_queued_sync_host_events(d);
+
+	/*
+	 * Sync-host event should be called for shader breakpoints on following stages:
+	 * - preamble nop,
+	 * - instruction_count * write subshader,
+	 * - epilogue nop
+	 * Detection/verification of the stage is performed by checking ip filled by SIP
+	 * before calling sync.host.
+	 */
+
+	if (!data->first_aip) {
+		/* 'nop' instruction from preamble */
+		igt_assert(data->aip_step);
+		data->first_aip = cur_ip + 0x10;
+		cur_instr = -1;
+	} else if (cur_ip >= data->first_aip) {
+		igt_assert_eq((cur_ip - data->first_aip) % data->aip_step, 0);
+		cur_instr = (cur_ip - data->first_aip) / data->aip_step;
+	} else {
+		cur_instr = -1;
 	}
 
+	next_bp = data->first_aip + (cur_instr + 1) * data->aip_step;
+	igt_debug("Breakpoint=%#x Step=%d/%d\n", cur_ip, data->steps_done, data->instruction_count + 2);
 	/* set breakpoint on next write instruction */
-	if (*counter < instruction_count) {
-		vm_read(data->vm_fd, &instr_usdw, sizeof(instr_usdw),
-			data->bb_offset + *kernel_offset + shader_preamble->size * 4 +
-			shader_write_instr->size * 4 * *counter);
-		instr_usdw |= breakpoint_bit;
-		vm_write(data->vm_fd, &instr_usdw, sizeof(instr_usdw),
-			 data->bb_offset + *kernel_offset + shader_preamble->size * 4 +
-			 shader_write_instr->size * 4 * *counter);
+	if (cur_instr + 1 < data->instruction_count) {
+		vm_read(data->vm_fd, &val, sizeof(val), next_bp);
+		val |= GENISA_BF_DBG_EXCEPTION;
+		vm_write(data->vm_fd, &val, sizeof(val), next_bp);
 		fsync(data->vm_fd);
 	}
 
 	/* restore current instruction */
-	if (*counter && *counter <= instruction_count)
-		overwrite_immediate_value_in_common_target_write(data->vm_fd,
-								 data->bb_offset + *kernel_offset +
-								 shader_preamble->size * 4 +
-								 shader_write_instr->size * 4 * (*counter - 1),
+	if (0 <= cur_instr && cur_instr < data->instruction_count)
+		overwrite_immediate_value_in_common_target_write(data,
+								 cur_ip,
 								 CACHING_POISON_VALUE,
-								 CACHING_VALUE(*counter - 1));
+								 CACHING_VALUE(cur_instr));
 
 	/* poison next instruction */
-	if (*counter < instruction_count)
-		overwrite_immediate_value_in_common_target_write(data->vm_fd,
-								 data->bb_offset + *kernel_offset +
-								 shader_preamble->size * 4 +
-								 shader_write_instr->size * 4 * *counter,
-								 CACHING_VALUE(*counter),
+	if (cur_instr + 1 < data->instruction_count)
+		overwrite_immediate_value_in_common_target_write(data,
+								 next_bp,
+								 CACHING_VALUE(cur_instr + 1),
 								 CACHING_POISON_VALUE);
 
-	gpgpu_shader_destroy(shader_write_instr);
-	gpgpu_shader_destroy(shader_preamble);
-
 	/* check surface at each breakpoint that is after write instruction */
-	if (*counter > 1 && *counter <= instruction_count + 1)
-		for (int i = 0; i < data->target_size; i += sizeof(uint32_t))
-			igt_assert_f(vm_read_target_u32(data, i) != CACHING_POISON_VALUE,
-				     "Poison value found at %04d!\n", i);
+	if (1 <= cur_instr && cur_instr <= data->instruction_count) {
+		uint32_t *ptr = malloc(data->target_size);
+		igt_assert(ptr);
+		vm_read_target(data, ptr, data->target_size, 0);
+		for (int i = 0; i < data->target_size / 4; ++i)
+			igt_assert_f(ptr[i] != CACHING_POISON_VALUE,
+				     "Poison value found at %04d!\n", 4 * i);
+		free(ptr);
+	}
+	++data->steps_done;
 
-	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, &seqno);
-	data->last_eu_control_seqno = seqno;
-
-	/*
-	 * XXX: build a better sync between workload lifetime vs resume.
-	 *
-	 * Right now, it is possible to get attention after the workload has vanished - in result,
-	 * eu_ctl above fails. Band-aid it by checking the eu_ctl return value only n times it is
-	 * actually expected - that is, instruction_count of writes + 2 nops.
-	 */
-	if (*counter < instruction_count + 2)
+resume:
+	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, NULL);
+	if (data->steps_done < data->instruction_count + 2)
 		igt_assert_eq(ret, 0);
 
-	(*counter)++;
 }
 
 static struct intel_bb *xe_bb_create_on_offset(int fd, uint32_t exec_queue, uint32_t vm,
@@ -2299,7 +2310,7 @@ static void run_online_client(struct xe_eudebug_client *c)
 		s_dim.y++;
 	/* Additional memory for caching check */
 	if ((data->flags & SHADER_CACHING_SRAM) || (data->flags & SHADER_CACHING_VRAM))
-		s_dim.y += caching_get_instruction_count(fd, s_dim.x, data->flags);
+		s_dim.y += data->instruction_count;
 	buf = create_uc_buf(fd, s_dim.x, s_dim.y,
 			    get_memory_region(fd, data->flags, TARGET_REGION_BITMASK));
 
@@ -2718,6 +2729,10 @@ static void online_session_check(struct xe_eudebug_session *s)
 	if (flags & SHADER_PAGEFAULT_ONE_OF_MANY) {
 		igt_assert_eq(pagefault_threads, 1);
 		igt_assert_eq(data->thread_hit_count, 1);
+	}
+
+	if (flags & (SHADER_CACHING_SRAM | SHADER_CACHING_VRAM)) {
+		igt_assert_eq(data->steps_done, data->instruction_count + 2);
 	}
 }
 
@@ -4071,6 +4086,7 @@ static void test_caching(int fd, struct drm_xe_engine_class_instance *hwe, uint6
 		igt_skip_on_f(!xe_has_vram(fd), "Device does not have VRAM.\n");
 
 	data = online_debug_data_create(fd, hwe, flags);
+	data->instruction_count = caching_get_instruction_count(data);
 
 	s = calloc(1, sizeof(*s));
 	igt_assert(s);
