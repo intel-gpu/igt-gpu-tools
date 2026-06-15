@@ -49,16 +49,11 @@
 (W)	mov (1)		dst.2<1>:ud	(width - 1):ud		;\
 (W)	mov (1)		dst.4<1>:ud	R0_FFTID
 
-#if GFX_VER < 3000
-#define SET_SURFACE_DESC(dst)			\
-(W)	mov (8)		dst.0<1>:ud	0x0:ud
-#else
 #define SET_SURFACE_DESC(dst)					\
 (W)	mov (1)		dst.0<1>:uq	R1_TGT_ADDRESS		;\
 (W)	add (1)		dst.2<1>:ud	R1_TGT_WIDTH	-1:d	;\
 (W)	add (1)		dst.3<1>:ud	R1_TGT_HEIGHT	-1:d	;\
 (W)	add (1)		dst.4<1>:ud	R1_TGT_WIDTH	-1:d
-#endif
 
 #define SET_SHARED_MEDIA_A2DBLOCK_PAYLOAD(dst, y, width)	\
 	SET_SURFACE_DESC(dst)					;\
@@ -73,24 +68,32 @@
 (W)	add (1)		dst.6<1>:ud	R0_TGIDY	y	;\
 (W)	mov (1)		dst.7<1>:ud	(width - 1):ud		;\
 
-#if GFX_VER < 2000
+#define SET_SHARED_A64_ADDR(dst, y)				\
+(W)	mul(1)		dst.0:ud TGT_WIDTH:ud y			;\
+(W)	add(1)		dst.0:uq TGT_ADDRESS:uq dst.0:ud	;\
+
+#define SET_THREAD_A64_ADDR(dst, x, y)				\
+(W)	shl(1)		dst.0:ud TGID_X:ud 2:ud			;\
+(W)	add(1)		dst.0:ud dst.0:ud x:ud			;\
+(W)	add(1)		dst.1:ud TGID_Y:ud y			;\
+(W)	mad(1)		dst.0:ud dst.0:ud dst.1:ud TGT_WIDTH:ud	;\
+(W)	add(1)		dst.0:uq TGT_ADDRESS:uq dst.0:ud	;\
+
+#if GFX_VER < 1260
 #define SET_SHARED_SPACE_ADDR(dst, y, width) SET_SHARED_MEDIA_BLOCK_MSG_HDR(dst, y, width)
 #define SET_THREAD_SPACE_ADDR(dst, x, y, width) SET_THREAD_MEDIA_BLOCK_MSG_HDR(dst, x, y, width)
 #define LOAD_SPACE_DW(dst, src) send.dc1 (1)	dst	src	src1_null 0x0	0x2190000
 #define STORE_SPACE_DW(dst, src) send.dc1 (1)	null	dst	src1_null 0x0	0x40A8000
+#elif GFX_VER < 3500
+#define SET_SHARED_SPACE_ADDR(dst, y, width) SET_SHARED_A64_ADDR(dst, y)
+#define SET_THREAD_SPACE_ADDR(dst, x, y, width) SET_THREAD_A64_ADDR(dst, x, y)
+#define LOAD_SPACE_DW(dst, src) send.ugm(1)	dst src null:0 0x0 0x02128580 // load.ugm.d32x1t.a64.uc.uc
+#define STORE_SPACE_DW(dst, src) send.ugm(1)	null dst src:1 0x0 0x02028584 // store.ugm.d32x1t.a64.uc.uc
 #else
 #define SET_SHARED_SPACE_ADDR(dst, y, width) SET_SHARED_MEDIA_A2DBLOCK_PAYLOAD(dst, y, width)
 #define SET_THREAD_SPACE_ADDR(dst, x, y, width) SET_THREAD_MEDIA_A2DBLOCK_PAYLOAD(dst, x, y, width)
-#if GFX_VER < 3000
-#define LOAD_SPACE_DW(dst, src) send.tgm (1)	dst	src	null:0	0x0	0x62120003 // load_block2d.tgm.d32.a32.uc.uc  bti[0][A]
-#define STORE_SPACE_DW(dst, src) send.tgm (1)	null	dst	null:0	0x0	0x64020007 // store_block2d.tgm.d32.a32.uc.uc  bti[0][A]
-#elif GFX_VER < 3500
-#define LOAD_SPACE_DW(dst, src) send.ugm (1)	dst	src	null:0	0x0	0x2120003
-#define STORE_SPACE_DW(dst, src) send.ugm (1)	null	dst	src:1	0x0	0x2020007
-#else
 #define LOAD_SPACE_DW(dst, src) sendg.ugm (1)	dst	src:1	null:0	0x28003
 #define STORE_SPACE_DW(dst, src) sendg.ugm (1)	null	dst:1	src:1	0x28007
-#endif
 #endif
 
 #endif
