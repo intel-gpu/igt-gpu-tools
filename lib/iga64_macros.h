@@ -17,17 +17,23 @@
 #endif
 
 /* GPGPU_R0Payload fields, Bspec: 55396, 56587 */
-#define R0_TGIDX r0.1:ud
-#define R0_TGIDY r0.6:ud
-#define R0_FFTID r0.5:ud
+#  define TGID_X r0.1
+#  define TGID_Y r0.6
+#  define R0_TGIDX TGID_X:ud
+#  define R0_TGIDY TGID_Y:ud
+#  define R0_FFTID r0.5:ud
 
-/* Inline data from COMPUTE_WALKER*, Bspec: 47203, 73584
+/* Inline data from COMPUTE_WALKER*, Bspec: 47203
  * Filled by __xe*_gpgpu_execfunc.
  */
-#define R1_TGT_ADDRESS r1.0:uq
-#define R1_TGT_WIDTH r1.2:ud
-#define R1_TGT_HEIGHT r1.3:ud
-#define R1_DIM_X r1.4:ud
+#  define TGT_ADDRESS r1.0
+#  define TGT_WIDTH r1.2
+#  define TGT_HEIGHT r1.3
+#  define DIM_X r1.4
+#  define R1_TGT_ADDRESS TGT_ADDRESS:uq
+#  define R1_TGT_WIDTH TGT_WIDTH:ud
+#  define R1_TGT_HEIGHT TGT_HEIGHT:ud
+#  define R1_DIM_X DIM_X:ud
 
 #define SET_SHARED_MEDIA_BLOCK_MSG_HDR(dst, y, width)	\
 (W)	mov (8)		dst.0:ud	0x0:ud		;\
