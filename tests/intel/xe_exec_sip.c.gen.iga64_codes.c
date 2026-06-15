@@ -3,7 +3,7 @@
 
 #include "gpgpu_shader.h"
 
-#define MD5_SUM_IGA64_ASMS 6a7e389099486480abcfab7fbf536427
+#define MD5_SUM_IGA64_ASMS 1863291fe5faacc38c45c89e6e1aaed7
 
 struct iga64_template const iga64_code_xe_exec_sip_illegal[] = {
 	{ .gfx_ver = 1250, .size = 8, .code = (const uint32_t []) {
