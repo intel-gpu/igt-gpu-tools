@@ -30,6 +30,7 @@ intelci_files = [
   'xe-sriov-vf.blocklist.txt',
   'xe.sriov-vm.blocklist.txt',
   'xe-sriov-vm.blocklist.txt',
+  'xe.kv6.17-only.blocklist.txt',
 ]
 
 if meson.version().version_compare('<1.3.0')
