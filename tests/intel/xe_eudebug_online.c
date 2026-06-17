@@ -174,6 +174,7 @@ struct online_debug_data {
 	int num_threads_per_eu;
 	int max_subslices_per_slice;
 	struct dim_t w_dim;
+	bool acked;
 };
 
 static int get_number_of_threads(struct online_debug_data *data)
@@ -475,13 +476,15 @@ static void wait_for_workloads_start(struct online_debug_data **data, int n)
 {
 	int val;
 	int count;
-	int i;
+	bool acked;
 
 	igt_for_milliseconds(n * STARTUP_TIMEOUT_MS) {
 		count = 0;
-		for (i = 0; i < n; i++) {
-			if (READ_ONCE(data[i]->vm_fd) == -1 ||
-			    READ_ONCE(data[i]->target_size) == 0)
+		for (int i = 0; i < n; i++) {
+			pthread_mutex_lock(&data[i]->mutex);
+			acked = data[i]->acked;
+			pthread_mutex_unlock(&data[i]->mutex);
+			if (!acked)
 				continue;
 
 			if (pread(data[i]->vm_fd, &val, sizeof(val),
@@ -1432,9 +1435,14 @@ static void ufence_ack_trigger(struct xe_eudebug_debugger *d,
 			       struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
+	struct online_debug_data *data = d->ptr;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE)
+	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
 		xe_eudebug_ack_ufence(d->fd, ef);
+		pthread_mutex_lock(&data->mutex);
+		data->acked = true;
+		pthread_mutex_unlock(&data->mutex);
+	}
 }
 
 static void ufence_ack_set_bp_trigger(struct xe_eudebug_debugger *d,
