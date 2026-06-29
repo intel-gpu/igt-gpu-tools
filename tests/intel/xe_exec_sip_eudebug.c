@@ -257,8 +257,8 @@ static void test_sip(enum shader_type shader_type, enum sip_type sip_type,
 	unsigned int width = WIDTH;
 	struct drm_xe_ext_set_property ext = {
 		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
-		.value = DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE,
+		.property = PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
+		.value = PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE,
 	};
 	struct timespec ts = { };
 	uint32_t exec_queue_id, handle, vm_id;
