@@ -145,7 +145,7 @@ extern "C" {
  * redefine the interface more easily than an ever growing struct of
  * increasing complexity, and for large parts of that interface to be
  * entirely optional. The downside is more pointer chasing; chasing across
- * the boundary with pointers encapsulated inside u64.
+ * the __user boundary with pointers encapsulated inside u64.
  *
  * Example chaining:
  *
@@ -2608,6 +2608,8 @@ enum drm_xe_ras_error_component {
 	[DRM_XE_RAS_ERR_COMP_CORE_COMPUTE] = "core-compute",		\
 	[DRM_XE_RAS_ERR_COMP_SOC_INTERNAL] = "soc-internal"		\
 }
+
+#include "xe_drm_prelim.h"
 
 #if defined(__cplusplus)
 }
