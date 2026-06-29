@@ -128,7 +128,7 @@ struct online_debug_data {
 	int stepped_threads_count;
 	struct timespec exception_arrived;
 	uint64_t last_eu_control_seqno;
-	struct drm_xe_eudebug_event *exception_event;
+	struct prelim_drm_xe_eudebug_event *exception_event;
 	uint32_t pf_thread_number;
 	int num_threads_per_eu;
 	int max_subslices_per_slice;
@@ -147,7 +147,6 @@ struct online_debug_data {
 		STEERING_CONTROL_LOOP,
 		STEERING_CONTROL_END_LOOP,
 	} steering_control;
-	int debugger_detach_count;
 };
 
 struct sip_arf_dump {
@@ -790,17 +789,6 @@ static void emit_shader_pagefault_one_of_many(struct gpgpu_shader *shader, uint3
 	)", pf_thread_number);
 }
 
-static void emit_store_sr0_0(struct gpgpu_shader *shader)
-{
-	emit_iga64_code(shader, store_sr0_0, R"(
-	#if GFX_VER >= 2000
-	mov (1) r5.0<1>:ud sr0.0:ud
-	SET_THREAD_SPACE_ADDR(r4, 0, 0:ud, 4)
-	STORE_SPACE_DW(r4, r5)
-	#endif
-	)");
-}
-
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
 	struct dim_t w_dim = walker_dimensions(data->thread_count);
@@ -916,7 +904,13 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 		if (!(data->flags & SHADER_PAGEFAULT_ONE_OF_MANY))
 			gpgpu_shader__write_aip(sip, 0);
 		else
-			emit_store_sr0_0(sip);
+			emit_iga64_code(sip, store_sr0_0, R"(
+#if GFX_VER >= 2000
+	mov (1) r5.0<1>:ud sr0.0:ud
+	SET_THREAD_SPACE_ADDR(r4, 0, 0:ud, 4)
+	STORE_SPACE_DW(r4, r5)
+#endif
+			)");
 
 		/*
 		* As gpgpu_shader__store_arf() shader implements its own
@@ -996,13 +990,13 @@ static int count_canaries_neq_for_e64(uint32_t *ptr, struct dim_t w_dim, uint32_
 static const char *td_ctl_cmd_to_str(uint32_t cmd)
 {
 	switch (cmd) {
-	case DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL:
+	case PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL:
 		return "interrupt all";
-	case DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED:
+	case PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED:
 		return "stopped";
-	case DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME:
+	case PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME:
 		return "resume";
-	case DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK:
+	case PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK:
 		return "unlock";
 	default:
 		return "unknown command";
@@ -1014,7 +1008,7 @@ static int __eu_ctl(int debugfd, uint64_t client,
 		    uint8_t *bitmask, uint32_t *bitmask_size,
 		    uint32_t cmd, uint64_t *seqno)
 {
-	struct drm_xe_eudebug_eu_control control = {
+	struct prelim_drm_xe_eudebug_eu_control control = {
 		.client_handle = lower_32_bits(client),
 		.exec_queue_handle = exec_queue,
 		.lrc_handle = lrc,
@@ -1026,7 +1020,7 @@ static int __eu_ctl(int debugfd, uint64_t client,
 	if (bitmask_size)
 		control.bitmask_size = *bitmask_size;
 
-	ret = igt_ioctl(debugfd, DRM_XE_EUDEBUG_IOCTL_EU_CONTROL, &control);
+	ret = igt_ioctl(debugfd, PRELIM_DRM_XE_EUDEBUG_IOCTL_EU_CONTROL, &control);
 
 	if (ret < 0)
 		return -errno;
@@ -1042,18 +1036,18 @@ static int __eu_ctl(int debugfd, uint64_t client,
 	return 0;
 }
 
-static int __eu_ctl_from_event(int debugfd, struct drm_xe_eudebug_event *e, uint32_t cmd,
+static int __eu_ctl_from_event(int debugfd, struct prelim_drm_xe_eudebug_event *e, uint32_t cmd,
 			       uint64_t *seqno)
 {
 	switch (e->type) {
-	case DRM_XE_EUDEBUG_EVENT_EU_ATTENTION: {
-		struct drm_xe_eudebug_event_eu_attention *at = igt_container_of(e, at, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION: {
+		struct prelim_drm_xe_eudebug_event_eu_attention *at = igt_container_of(e, at, base);
 
 		return __eu_ctl(debugfd, at->client_handle, at->exec_queue_handle, at->lrc_handle,
 				at->bitmask, &at->bitmask_size, cmd, seqno);
 	}
-	case DRM_XE_EUDEBUG_EVENT_SYNC_HOST: {
-		struct drm_xe_eudebug_event_sync_host *es = igt_container_of(e, es, base);
+	case PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST: {
+		struct prelim_drm_xe_eudebug_event_sync_host *es = igt_container_of(e, es, base);
 
 		return __eu_ctl(debugfd, es->client_handle, es->exec_queue_handle, es->lrc_handle,
 				NULL, 0, cmd, seqno);
@@ -1098,7 +1092,7 @@ static uint64_t eu_ctl_resume(int fd, int debugfd, uint64_t client,
 	}
 
 	return eu_ctl(debugfd, client, exec_queue, lrc, bitmask, &bitmask_size,
-		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME);
+		      PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME);
 }
 
 static inline uint64_t eu_ctl_stopped(int debugfd, uint64_t client,
@@ -1106,21 +1100,21 @@ static inline uint64_t eu_ctl_stopped(int debugfd, uint64_t client,
 				      uint8_t *bitmask, uint32_t *bitmask_size)
 {
 	return eu_ctl(debugfd, client, exec_queue, lrc, bitmask, bitmask_size,
-		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED);
+		      PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED);
 }
 
 static inline uint64_t eu_ctl_interrupt_all(int debugfd, uint64_t client,
 					    uint64_t exec_queue, uint64_t lrc)
 {
 	return eu_ctl(debugfd, client, exec_queue, lrc, NULL, 0,
-		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
+		      PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
 }
 
 static inline uint64_t eu_ctl_unlock(int debugfd, uint64_t client,
 				     uint64_t exec_queue, uint64_t lrc)
 {
 	return eu_ctl(debugfd, client, exec_queue, lrc, NULL, 0,
-		      DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK);
+		      PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK);
 }
 
 static struct online_debug_data *
@@ -1199,9 +1193,9 @@ static void wait_for_workload_start(struct online_debug_data *data)
 }
 
 static void eu_attention_debug_trigger(struct xe_eudebug_debugger *d,
-				       struct drm_xe_eudebug_event *e)
+				       struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_eu_attention *att = (void *)e;
+	struct prelim_drm_xe_eudebug_event_eu_attention *att = (void *)e;
 	uint32_t *ptr = (uint32_t *)att->bitmask;
 
 	igt_debug("EVENT[%llu] eu-attenttion; threads=%d "
@@ -1215,9 +1209,9 @@ static void eu_attention_debug_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void sync_host_debug_trigger(struct xe_eudebug_debugger *d,
-				    struct drm_xe_eudebug_event *e)
+				    struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_sync_host *s = (void *) e;
+	struct prelim_drm_xe_eudebug_event_sync_host *s = (void *) e;
 
 	igt_debug("EVENT[%llu] sync-host; client[%llu], exec_queue[%llu], "
 		  "lrc[%llu]\n", s->base.seqno,
@@ -1227,9 +1221,9 @@ static void sync_host_debug_trigger(struct xe_eudebug_debugger *d,
 
 
 static void eu_attention_reset_trigger(struct xe_eudebug_debugger *d,
-				       struct drm_xe_eudebug_event *e)
+				       struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_eu_attention *att = (void *)e;
+	struct prelim_drm_xe_eudebug_event_eu_attention *att = (void *)e;
 	uint32_t *ptr = (uint32_t *)att->bitmask;
 	struct online_debug_data *data = d->ptr;
 
@@ -1246,9 +1240,9 @@ static void eu_attention_reset_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void sync_host_reset_trigger(struct xe_eudebug_debugger *d,
-				    struct drm_xe_eudebug_event *e)
+				    struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_sync_host *s = (void *) e;
+	struct prelim_drm_xe_eudebug_event_sync_host *s = (void *) e;
 	struct online_debug_data *data = d->ptr;
 
 	igt_debug("EVENT[%llu] sync-host with sync reset; client[%llu], exec_queue[%llu], "
@@ -1397,7 +1391,7 @@ static int get_stepped_threads_count(struct online_debug_data *data, int threads
 }
 
 static void save_first_exception_trigger(struct xe_eudebug_debugger *d,
-					 struct drm_xe_eudebug_event *e)
+					 struct prelim_drm_xe_eudebug_event *e)
 {
 	struct online_debug_data *data = d->ptr;
 
@@ -1418,9 +1412,9 @@ static void set_steering_flag(struct online_debug_data *data, uint32_t val)
 
 #define MAX_PREEMPT_TIMEOUT 10ull
 static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
-					struct drm_xe_eudebug_event *e)
+					struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_eu_attention *att = (void *) e;
+	struct prelim_drm_xe_eudebug_event_eu_attention *att = (void *) e;
 	struct online_debug_data *data = d->ptr;
 	uint32_t bitmask_size = att->bitmask_size;
 	uint8_t *bitmask;
@@ -1491,9 +1485,9 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
-				     struct drm_xe_eudebug_event *e)
+				     struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct prelim_drm_xe_eudebug_event_sync_host *es = (void *) e;
 	struct online_debug_data *data = d->ptr;
 
 	if (data->last_eu_control_seqno > es->base.seqno)
@@ -1555,9 +1549,9 @@ static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *d,
-						    struct drm_xe_eudebug_event *e)
+						    struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_eu_attention *att = (void *) e;
+	struct prelim_drm_xe_eudebug_event_eu_attention *att = (void *) e;
 	struct online_debug_data *data = d->ptr;
 	const int threads = data->thread_count;
 	uint32_t val;
@@ -1659,7 +1653,7 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 #define MAX_EVENT_SIZE (32 * 1024)
 static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
 {
-	struct drm_xe_eudebug_event_sync_host e = {};
+	struct prelim_drm_xe_eudebug_event_sync_host e = {};
 	struct pollfd p = { .events = POLLIN };
 	int ret;
 
@@ -1679,7 +1673,7 @@ static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
 			break;
 
 		if (ret == 1 && (p.revents & POLLIN)) {
-			e.base.type = DRM_XE_EUDEBUG_EVENT_READ;
+			e.base.type = PRELIM_DRM_XE_EUDEBUG_EVENT_READ;
 			e.base.flags = 0;
 			e.base.len = sizeof(e);
 
@@ -1690,22 +1684,22 @@ static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
 			 * In all error cases simply exit. This is recoverable.
 			 */
 			if (ioctl(d->fd,
-				  DRM_XE_EUDEBUG_IOCTL_READ_EVENT,
+				  PRELIM_DRM_XE_EUDEBUG_IOCTL_READ_EVENT,
 				  &e.base))
 				break;
 
 			++d->event_count;
 			xe_eudebug_event_log_write(d->log, &e.base);
 			/* The test is screwed already. Will fail */
-			igt_assert(e.base.type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
+			igt_assert(e.base.type == PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
 		}
 	} while(1);
 }
 
 static void sync_host_resume_single_step_trigger(struct xe_eudebug_debugger *d,
-						 struct drm_xe_eudebug_event *e)
+						 struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct prelim_drm_xe_eudebug_event_sync_host *es = (void *) e;
 	struct online_debug_data *data = d->ptr;
 	const int threads = data->thread_count;
 	uint32_t val;
@@ -1789,9 +1783,9 @@ static bool set_resume_on_halted_thread(struct online_debug_data *data)
 }
 
 static void sync_host_e64_resume_trigger(struct xe_eudebug_debugger *d,
-					 struct drm_xe_eudebug_event *e)
+					 struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct prelim_drm_xe_eudebug_event_sync_host *es = (void *) e;
 	struct online_debug_data *data = d->ptr;
 	static int count = 1;
 
@@ -1925,9 +1919,9 @@ static void sso_e64_compare_aip(struct online_debug_data *data, uint32_t i)
  */
 #define SINGLE_STEP_STEPS_VERIFY	0x2
 static void sync_host_e64_single_step_resume_trigger(struct xe_eudebug_debugger *d,
-						     struct drm_xe_eudebug_event *e)
+						     struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
+	struct prelim_drm_xe_eudebug_event_sync_host *es = (void *) e;
 	struct online_debug_data *data = d->ptr;
 	int thread_to_resume, i;
 
@@ -2028,12 +2022,12 @@ static void sync_host_e64_single_step_resume_trigger(struct xe_eudebug_debugger 
 }
 
 static void open_trigger(struct xe_eudebug_debugger *d,
-			 struct drm_xe_eudebug_event *e)
+			 struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_client *client = (void *)e;
+	struct prelim_drm_xe_eudebug_event_client *client = (void *)e;
 	struct online_debug_data *data = d->ptr;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_DESTROY)
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY)
 		return;
 
 	pthread_mutex_lock(&data->mutex);
@@ -2042,12 +2036,12 @@ static void open_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void exec_queue_trigger(struct xe_eudebug_debugger *d,
-			       struct drm_xe_eudebug_event *e)
+			       struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_exec_queue *eq = (void *)e;
+	struct prelim_drm_xe_eudebug_event_exec_queue *eq = (void *)e;
 	struct online_debug_data *data = d->ptr;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_DESTROY)
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY)
 		return;
 
 	pthread_mutex_lock(&data->mutex);
@@ -2057,18 +2051,18 @@ static void exec_queue_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void vm_open_trigger(struct xe_eudebug_debugger *d,
-			    struct drm_xe_eudebug_event *e)
+			    struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_vm *vm = (void *)e;
+	struct prelim_drm_xe_eudebug_event_vm *vm = (void *)e;
 	struct online_debug_data *data = d->ptr;
-	struct drm_xe_eudebug_vm_open vo = {
+	struct prelim_drm_xe_eudebug_vm_open vo = {
 		.client_handle = vm->client_handle,
 		.vm_handle = vm->vm_handle,
 	};
 	int fd;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
-		fd = igt_ioctl(d->fd, DRM_XE_EUDEBUG_IOCTL_VM_OPEN, &vo);
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
+		fd = igt_ioctl(d->fd, PRELIM_DRM_XE_EUDEBUG_IOCTL_VM_OPEN, &vo);
 		igt_assert_lte(0, fd);
 
 		pthread_mutex_lock(&data->mutex);
@@ -2090,7 +2084,7 @@ static void read_metadata(struct xe_eudebug_debugger *d,
 			  uint64_t type,
 			  uint64_t len)
 {
-	struct drm_xe_eudebug_read_metadata rm = {
+	struct prelim_drm_xe_eudebug_read_metadata rm = {
 		.client_handle = client_handle,
 		.metadata_handle = metadata_handle,
 		.size = len,
@@ -2102,15 +2096,15 @@ static void read_metadata(struct xe_eudebug_debugger *d,
 	igt_assert(metadata);
 
 	rm.ptr = to_user_pointer(metadata);
-	igt_assert_eq(igt_ioctl(d->fd, DRM_XE_EUDEBUG_IOCTL_READ_METADATA, &rm), 0);
+	igt_assert_eq(igt_ioctl(d->fd, PRELIM_DRM_XE_EUDEBUG_IOCTL_READ_METADATA, &rm), 0);
 
 	pthread_mutex_lock(&data->mutex);
 	switch (type) {
-	case DRM_XE_DEBUG_METADATA_ELF_BINARY:
+	case PRELIM_DRM_XE_DEBUG_METADATA_ELF_BINARY:
 		data->bb_offset = metadata[0];
 		data->bb_size = metadata[1];
 		break;
-	case DRM_XE_DEBUG_METADATA_PROGRAM_MODULE:
+	case PRELIM_DRM_XE_DEBUG_METADATA_PROGRAM_MODULE:
 		data->target_offset = metadata[0];
 		data->target_size = metadata[1];
 		break;
@@ -2122,11 +2116,11 @@ static void read_metadata(struct xe_eudebug_debugger *d,
 	free(metadata);
 }
 
-static void create_metadata_trigger(struct xe_eudebug_debugger *d, struct drm_xe_eudebug_event *e)
+static void create_metadata_trigger(struct xe_eudebug_debugger *d, struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_metadata *em = (void *)e;
+	struct prelim_drm_xe_eudebug_event_metadata *em = (void *)e;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE)
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE)
 		read_metadata(d, em->client_handle, em->metadata_handle, em->type, em->len);
 }
 
@@ -2155,7 +2149,7 @@ overwrite_immediate_value_in_common_target_write(struct online_debug_data *data,
 }
 
 static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
-					     struct drm_xe_eudebug_event *e)
+					     struct prelim_drm_xe_eudebug_event *e)
 {
 	struct online_debug_data *data = d->ptr;
 	uint32_t val, cur_ip = 0, next_bp;
@@ -2254,7 +2248,7 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	++data->steps_done;
 
 resume:
-	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, &seqno);
+	ret = __eu_ctl_from_event(d->fd, e, PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, &seqno);
 	data->last_eu_control_seqno = seqno;
 	if (data->steps_done < data->instruction_count + 2) {
 		igt_assert_eq(ret, 0);
@@ -2309,8 +2303,8 @@ static void run_online_client(struct xe_eudebug_client *c)
 	struct drm_xe_engine_class_instance hwe = data->hwe;
 	struct drm_xe_ext_set_property ext = {
 		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
-		.value = DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE,
+		.property = PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
+		.value = PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE,
 	};
 	struct drm_xe_exec_queue_create create = {
 		.instances = to_user_pointer(&hwe),
@@ -2358,10 +2352,10 @@ static void run_online_client(struct xe_eudebug_client *c)
 	metadata[0][1] = bb_size;
 	metadata[1][0] = target_offset;
 	metadata[1][1] = buf->size;
-	metadata_id[0] = xe_eudebug_client_metadata_create(c, fd, DRM_XE_DEBUG_METADATA_ELF_BINARY,
+	metadata_id[0] = xe_eudebug_client_metadata_create(c, fd, PRELIM_DRM_XE_DEBUG_METADATA_ELF_BINARY,
 							   2 * sizeof(**metadata), metadata[0]);
 	metadata_id[1] = xe_eudebug_client_metadata_create(c, fd,
-							   DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
+							   PRELIM_DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
 							   2 * sizeof(**metadata), metadata[1]);
 
 	vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE;
@@ -2439,10 +2433,10 @@ static void run_online_client(struct xe_eudebug_client *c)
 	xe_eudebug_client_exec_queue_destroy(c, fd, &create);
 	xe_eudebug_client_vm_destroy(c, fd, create.vm_id);
 
-	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[0], DRM_XE_DEBUG_METADATA_ELF_BINARY,
+	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[0], PRELIM_DRM_XE_DEBUG_METADATA_ELF_BINARY,
 					   2 * sizeof(**metadata));
 	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[1],
-					   DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
+					   PRELIM_DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
 					   2 * sizeof(**metadata));
 
 	intel_buf_destroy(buf);
@@ -2461,9 +2455,9 @@ static void run_online_client_for_e64(struct xe_eudebug_client *c)
 	struct drm_xe_engine_class_instance hwe = data->hwe;
 	struct drm_xe_ext_set_property ext = {
 		.base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY,
-		.property = DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
-		.value = DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE |
-			 DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_PAGEFAULT_ENABLE,
+		.property = PRELIM_DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG,
+		.value = PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE |
+			 PRELIM_DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_PAGEFAULT_ENABLE,
 	};
 	struct drm_xe_exec_queue_create create = {
 		.instances = to_user_pointer(&hwe),
@@ -2501,10 +2495,10 @@ static void run_online_client_for_e64(struct xe_eudebug_client *c)
 	metadata[0][1] = bb_size;
 	metadata[1][0] = target_offset;
 	metadata[1][1] = buf->size;
-	metadata_id[0] = xe_eudebug_client_metadata_create(c, fd, DRM_XE_DEBUG_METADATA_ELF_BINARY,
+	metadata_id[0] = xe_eudebug_client_metadata_create(c, fd, PRELIM_DRM_XE_DEBUG_METADATA_ELF_BINARY,
 							   2 * sizeof(*metadata), metadata[0]);
 	metadata_id[1] = xe_eudebug_client_metadata_create(c, fd,
-							   DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
+							   PRELIM_DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
 							   2 * sizeof(*metadata), metadata[1]);
 
 	/* Long Running mode and Pagefault mode (recoverable pagefault) */
@@ -2560,10 +2554,10 @@ static void run_online_client_for_e64(struct xe_eudebug_client *c)
 	xe_eudebug_client_exec_queue_destroy(c, fd, &create);
 	xe_eudebug_client_vm_destroy(c, fd,  create.vm_id);
 
-	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[0], DRM_XE_DEBUG_METADATA_ELF_BINARY,
+	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[0], PRELIM_DRM_XE_DEBUG_METADATA_ELF_BINARY,
 					   2 * sizeof(*metadata));
 	xe_eudebug_client_metadata_destroy(c, fd, metadata_id[1],
-					   DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
+					   PRELIM_DRM_XE_DEBUG_METADATA_PROGRAM_MODULE,
 					   2 * sizeof(*metadata));
 
 	xe_device_put(fd);
@@ -2624,18 +2618,18 @@ static int query_attention_bitmask_size(int fd, int gt)
 	return max_eu_count * DIV_ROUND_UP(threads_per_eu, 8);
 }
 
-static struct drm_xe_eudebug_event_exec_queue *
+static struct prelim_drm_xe_eudebug_event_exec_queue *
 match_attention_with_exec_queue(struct xe_eudebug_event_log *log,
-				struct drm_xe_eudebug_event_eu_attention *ea)
+				struct prelim_drm_xe_eudebug_event_eu_attention *ea)
 {
-	struct drm_xe_eudebug_event_exec_queue *ee;
-	struct drm_xe_eudebug_event *event = NULL, *current = NULL, *matching_destroy = NULL;
+	struct prelim_drm_xe_eudebug_event_exec_queue *ee;
+	struct prelim_drm_xe_eudebug_event *event = NULL, *current = NULL, *matching_destroy = NULL;
 	int lrc_idx;
 
 	xe_eudebug_for_each_event(event, log) {
-		if (event->type == DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE &&
-		    event->flags == DRM_XE_EUDEBUG_EVENT_CREATE) {
-			ee = (struct drm_xe_eudebug_event_exec_queue *)event;
+		if (event->type == PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE &&
+		    event->flags == PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
+			ee = (struct prelim_drm_xe_eudebug_event_exec_queue *)event;
 
 			if (ee->exec_queue_handle != ea->exec_queue_handle)
 				continue;
@@ -2662,9 +2656,9 @@ match_attention_with_exec_queue(struct xe_eudebug_event_log *log,
 			 */
 			current = event;
 			xe_eudebug_for_each_event(current, log) {
-				if (current->type == DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE &&
-				    current->flags == DRM_XE_EUDEBUG_EVENT_DESTROY) {
-					uint8_t offset = sizeof(struct drm_xe_eudebug_event);
+				if (current->type == PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE &&
+				    current->flags == PRELIM_DRM_XE_EUDEBUG_EVENT_DESTROY) {
+					uint8_t offset = sizeof(struct prelim_drm_xe_eudebug_event);
 
 					if (memcmp((uint8_t *)current + offset,
 						   (uint8_t *)event + offset,
@@ -2686,10 +2680,10 @@ match_attention_with_exec_queue(struct xe_eudebug_event_log *log,
 
 static void online_session_check(struct xe_eudebug_session *s)
 {
-	struct drm_xe_eudebug_event_eu_attention *ea = NULL;
-	struct drm_xe_eudebug_event_pagefault *pf = NULL;
-	struct drm_xe_eudebug_event_eu_attention *prev_ea = NULL;
-	struct drm_xe_eudebug_event *event = NULL;
+	struct prelim_drm_xe_eudebug_event_eu_attention *ea = NULL;
+	struct prelim_drm_xe_eudebug_event_pagefault *pf = NULL;
+	struct prelim_drm_xe_eudebug_event_eu_attention *prev_ea = NULL;
+	struct prelim_drm_xe_eudebug_event *event = NULL;
 	struct online_debug_data *data = s->client->ptr;
 	uint64_t flags = data->flags;
 	bool expect_exception = flags & (DISABLE_EXCEPTIONS | DISABLE_DEBUG_MODE) ? false : true;
@@ -2705,7 +2699,7 @@ static void online_session_check(struct xe_eudebug_session *s)
 		bool exception_raised = false;
 
 		xe_eudebug_for_each_event(event, s->debugger->log)
-			if (event->type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST) {
+			if (event->type == PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST) {
 				exception_raised = true;
 				break;
 			}
@@ -2716,10 +2710,10 @@ static void online_session_check(struct xe_eudebug_session *s)
 
 	bitmask_size = query_attention_bitmask_size(s->debugger->master_fd, data->hwe.gt_id);
 	xe_eudebug_for_each_event(event, s->debugger->log) {
-		if (event->type == DRM_XE_EUDEBUG_EVENT_EU_ATTENTION) {
-			ea = (struct drm_xe_eudebug_event_eu_attention *)event;
+		if (event->type == PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION) {
+			ea = (struct prelim_drm_xe_eudebug_event_eu_attention *)event;
 
-			igt_assert(event->flags == DRM_XE_EUDEBUG_EVENT_STATE_CHANGE);
+			igt_assert(event->flags == PRELIM_DRM_XE_EUDEBUG_EVENT_STATE_CHANGE);
 			igt_assert_eq(ea->bitmask_size, bitmask_size);
 			igt_assert(match_attention_with_exec_queue(s->debugger->log, ea));
 
@@ -2735,7 +2729,7 @@ static void online_session_check(struct xe_eudebug_session *s)
 				sum += igt_bitmap_hweight(ea->bitmask, bitmask_size * 8);
 
 			prev_ea = ea;
-		} else if (event->type == DRM_XE_EUDEBUG_EVENT_PAGEFAULT) {
+		} else if (event->type == PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT) {
 			uint32_t after_offset = bitmask_size / sizeof(uint32_t);
 			uint32_t resolved_offset = bitmask_size / sizeof(uint32_t) * 2;
 			uint32_t *ptr = NULL;
@@ -2775,12 +2769,12 @@ static void online_session_check(struct xe_eudebug_session *s)
 }
 
 static void ufence_ack_trigger(struct xe_eudebug_debugger *d,
-			       struct drm_xe_eudebug_event *e)
+			       struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
+	struct prelim_drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
 	struct online_debug_data *data = d->ptr;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
 		xe_eudebug_ack_ufence(d->fd, ef);
 		pthread_mutex_lock(&data->mutex);
 		data->acked = true;
@@ -2789,12 +2783,12 @@ static void ufence_ack_trigger(struct xe_eudebug_debugger *d,
 }
 
 static void ufence_ack_set_bp_trigger(struct xe_eudebug_debugger *d,
-				      struct drm_xe_eudebug_event *e)
+				      struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
+	struct prelim_drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
 	struct online_debug_data *data = d->ptr;
 
-	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
+	if (e->flags & PRELIM_DRM_XE_EUDEBUG_EVENT_CREATE) {
 		set_breakpoint_once(d, data);
 		xe_eudebug_ack_ufence(d->fd, ef);
 	}
@@ -2816,9 +2810,9 @@ static uint32_t attn_to_sr0_0(struct online_debug_data *data, int att_nr)
 }
 
 static void pagefault_trigger(struct xe_eudebug_debugger *d,
-			      struct drm_xe_eudebug_event *e)
+			      struct prelim_drm_xe_eudebug_event *e)
 {
-	struct drm_xe_eudebug_event_pagefault *pf = igt_container_of(e, pf, base);
+	struct prelim_drm_xe_eudebug_event_pagefault *pf = igt_container_of(e, pf, base);
 	struct online_debug_data *data = d->ptr;
 	uint32_t attn_size = pf->bitmask_size / 3;
 	int attn_size_as_u32 = attn_size / sizeof(uint32_t);
@@ -2934,17 +2928,17 @@ static void test_basic_online(int fd, struct drm_xe_engine_class_instance *hwe, 
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
 
 	xe_eudebug_session_run(s);
@@ -2966,11 +2960,11 @@ static void test_breakpoint_not_debuggable_per_context_debug(int fd,
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 	s->client->allow_dead_client = true;
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM,
 					vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
@@ -3026,21 +3020,21 @@ static void test_set_breakpoint_online(int fd, struct drm_xe_engine_class_instan
 
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_set_bp_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
 
 	xe_eudebug_session_run(s);
@@ -3098,22 +3092,22 @@ static void test_set_breakpoint_online_sigint_debugger(int fd,
 		data = online_debug_data_create(fd, hwe, flags);
 		s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 		s->client->allow_dead_client = true;
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 						open_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 						exec_queue_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM,
 						vm_open_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 						create_metadata_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 						ufence_ack_set_bp_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 						eu_attention_resume_trigger);
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_resume_trigger);
 
 
@@ -3233,20 +3227,20 @@ static void test_pagefault_online(int fd, struct drm_xe_engine_class_instance *h
 	}
 	s = xe_eudebug_session_create(fd, run_online_client, data->flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_PAGEFAULT,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT,
 					pagefault_trigger);
 
 	xe_eudebug_session_run(s);
@@ -3276,16 +3270,16 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 	other = xe_eudebug_client_create(fd, run_online_client, SHADER_NOP, other_data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
@@ -3352,28 +3346,28 @@ static void test_basic_online_for_e64(int fd, struct drm_xe_engine_class_instanc
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client_for_e64, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
 
 	/* Per context debug */
 	if (flags & SHADER_SINGLE_STEP)
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_e64_single_step_resume_trigger);
 	else
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_e64_resume_trigger);
 
 	/* for e64 pagefault read testcase */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	/* for DRM_XE_EUDEBUG_IOCTL_VM_OPEN */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	/* for PRELIM_DRM_XE_EUDEBUG_IOCTL_VM_OPEN */
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
 	/* to get the target_offset that indicates the ppgtt address of debug surface */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
 
 	/* Long Running mode and Pagefault mode of vm requies to ack ufenc for vm_bind */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	xe_eudebug_session_run(s);
 
@@ -3399,24 +3393,24 @@ static void test_reset_with_attention_online(int fd, struct drm_xe_engine_class_
 	data = online_debug_data_create(fd, hwe, flags);
 	s1 = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s1->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s1->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_reset_trigger);
-	xe_eudebug_debugger_add_trigger(s1->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s1->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s1->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s1->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_reset_trigger);
 
 	xe_eudebug_session_run(s1);
 	xe_eudebug_session_destroy(s1);
 
 	s2 = xe_eudebug_session_create(fd, run_online_client, flags, data);
-	xe_eudebug_debugger_add_trigger(s2->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s2->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s2->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s2->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s2->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s2->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
 
 	xe_eudebug_session_run(s2);
@@ -3483,24 +3477,24 @@ static void test_interrupt_all(int fd, struct drm_xe_engine_class_instance *hwe,
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
@@ -3571,24 +3565,24 @@ static void test_interrupt_other_two_sessions(int fd, struct drm_xe_engine_class
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
 
 	if (intel_gen_per_context_eudebug(fd)) {
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_resume_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						save_first_exception_trigger);
 	}
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
@@ -3602,24 +3596,24 @@ static void test_interrupt_other_two_sessions(int fd, struct drm_xe_engine_class
 	debugee_data = online_debug_data_create(fd, hwe, flags);
 	debugee_s = xe_eudebug_session_create(fd, run_online_client, flags, debugee_data);
 
-	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
-	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
 
 	if (intel_gen_per_context_eudebug(fd)) {
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_resume_trigger);
-		xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						save_first_exception_trigger);
 	}
 
-	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(debugee_s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(debugee_s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(debugee_s->debugger, debugee_s->client), 0);
@@ -3645,7 +3639,7 @@ static void test_interrupt_other_two_sessions(int fd, struct drm_xe_engine_class
 		 */
 		eu_ctl(debugee_s->debugger->fd, debugee_data->client_handle,
 		       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
-		       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
+		       PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
 		ret = wait_for_exception(data, STARTUP_TIMEOUT_MS);
 		set_steering_flag(data, STEERING_END_LOOP);
 		igt_assert_f(ret, "Exception arrived for wrong context.\n");
@@ -3656,7 +3650,7 @@ static void test_interrupt_other_two_sessions(int fd, struct drm_xe_engine_class
 		 */
 		igt_assert_eq(__eu_ctl(debugee_s->debugger->fd, debugee_data->client_handle,
 				       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
-				       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
+				       PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
 		xe_force_gt_reset_async(s->debugger->master_fd, debugee_data->hwe.gt_id);
 	}
 
@@ -3714,24 +3708,24 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN, open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
 
 	if (intel_gen_per_context_eudebug(fd)) {
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_resume_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						save_first_exception_trigger);
 	}
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
@@ -3767,7 +3761,7 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 		 */
 		eu_ctl(s->debugger->fd, debugee_data->client_handle,
 		       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
-		       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
+		       PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL);
 		ret = wait_for_exception(data, STARTUP_TIMEOUT_MS);
 		pthread_mutex_lock(&data->mutex);
 		data->steering_control = STEERING_CONTROL_END_LOOP;
@@ -3780,7 +3774,7 @@ static void test_interrupt_other(int fd, struct drm_xe_engine_class_instance *hw
 		 */
 		igt_assert_eq(__eu_ctl(s->debugger->fd, debugee_data->client_handle,
 				       debugee_data->exec_queue_handle, debugee_data->lrc_handle, NULL, 0,
-				       DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
+				       PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL), -EINVAL);
 		xe_force_gt_reset_async(s->debugger->master_fd, debugee_data->hwe.gt_id);
 	}
 
@@ -3832,23 +3826,23 @@ static void test_tdctl_parameters(int fd, struct drm_xe_engine_class_instance *h
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
@@ -3866,19 +3860,19 @@ static void test_tdctl_parameters(int fd, struct drm_xe_engine_class_instance *h
 	igt_assert(__eu_ctl(s->debugger->fd, data->client_handle,
 			    data->exec_queue_handle, data->lrc_handle + 1,
 			    attention_bitmask, &bitmask_size,
-			    DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL) == -EINVAL);
+			    PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL) == -EINVAL);
 
 	/* fail on invalid exec_queue_handle */
 	igt_assert(__eu_ctl(s->debugger->fd, data->client_handle,
 			    data->exec_queue_handle + 1, data->lrc_handle,
 			    attention_bitmask, &bitmask_size,
-			    DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL) == -EINVAL);
+			    PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL) == -EINVAL);
 
 	/* fail on invalid client */
 	igt_assert(__eu_ctl(s->debugger->fd, data->client_handle + 1,
 			    data->exec_queue_handle, data->lrc_handle,
 			    attention_bitmask, &bitmask_size,
-			    DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL) == -EINVAL);
+			    PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL, NULL) == -EINVAL);
 
 	/*
 	 * bitmask size must be aligned to sizeof(u32) for all commands
@@ -3888,11 +3882,11 @@ static void test_tdctl_parameters(int fd, struct drm_xe_engine_class_instance *h
 	igt_assert(__eu_ctl(s->debugger->fd, data->client_handle,
 			    data->exec_queue_handle, data->lrc_handle,
 			    attention_bitmask, &bitmask_size,
-			    DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED, NULL) == -EINVAL);
+			    PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED, NULL) == -EINVAL);
 	bitmask_size = 0;
 
 	/* fail on invalid command */
-	random_command = random() | (DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME + 1);
+	random_command = random() | (PRELIM_DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME + 1);
 	igt_assert(__eu_ctl(s->debugger->fd, data->client_handle,
 			    data->exec_queue_handle, data->lrc_handle,
 			    attention_bitmask, &bitmask_size, random_command, NULL) == -EINVAL);
@@ -3917,7 +3911,7 @@ static void test_tdctl_parameters(int fd, struct drm_xe_engine_class_instance *h
 }
 
 static void eu_debugger_detach_trigger(struct xe_eudebug_debugger *d,
-				       struct drm_xe_eudebug_event *event)
+				       struct prelim_drm_xe_eudebug_event *event)
 {
 	struct online_debug_data *data = d->ptr;
 	uint64_t c_pid;
@@ -3942,23 +3936,24 @@ static void eu_debugger_detach_trigger(struct xe_eudebug_debugger *d,
 	reset_debugger_log(d);
 
 	/* interrupt-reconnect:
-	* 1st eudebug will disconnect causing GT reset.
-	* When 2nd eudebug is connected client exits.
-	*
-	* Discovery process (2nd eudebug) in KMD blocks
-	* client exit. This will result in full set of
-	* create events.
-	* However as soon as discovery is done, client will
-	* exit and there will be destroy events in the queue.
-	*
-	* Our test framework reads events one by one and
-	* can perform dedicated action.
-	* For interrupt-reconnect for the second debugger remove
-	* triggers that are performing actions as we know the
-	* resources may be already removed.
-	*/
-	xe_eudebug_debugger_remove_trigger(d, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_remove_trigger(d, DRM_XE_EUDEBUG_EVENT_METADATA, create_metadata_trigger);
+	 * 1st eudebug will disconnect causing GT reset.
+	 * When 2nd eudebug is connected client exits.
+	 *
+	 * Discovery process (2nd eudebug) in KMD blocks
+	 * client exit. This will result in full set of
+	 * create events.
+	 * However as soon as discovery is done, client will
+	 * exit and there will be destroy events in the queue.
+	 *
+	 * Our test framework reads events one by one and
+	 * can perform dedicated action.
+	 * For interrupt-reconnect for the second debugger remove
+	 * triggers that are performing actions as we know the
+	 * resources may be already removed.
+	 */
+	xe_eudebug_debugger_remove_trigger(d, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_remove_trigger(d, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
+					   create_metadata_trigger);
 
 	ret = xe_eudebug_debugger_reattach(d, c_pid);
 	igt_assert_eq(ret, 0);
@@ -3981,30 +3976,30 @@ static void eu_debugger_detach_trigger(struct xe_eudebug_debugger *d,
  */
 static void test_interrupt_reconnect(int fd, struct drm_xe_engine_class_instance *hwe, uint64_t flags)
 {
-	struct drm_xe_eudebug_event *e = NULL;
+	struct prelim_drm_xe_eudebug_event *e = NULL;
 	struct online_debug_data *data;
 	struct xe_eudebug_session *s;
 
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 					exec_queue_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_debugger_detach_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					eu_debugger_detach_trigger);
 
 
@@ -4034,8 +4029,8 @@ static void test_interrupt_reconnect(int fd, struct drm_xe_engine_class_instance
 
 	/* We expect workload reset, so no attention/sync_host should be raised */
 	xe_eudebug_for_each_event(e, s->debugger->log) {
-		igt_assert(e->type != DRM_XE_EUDEBUG_EVENT_EU_ATTENTION);
-		igt_assert(e->type != DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
+		igt_assert(e->type != PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION);
+		igt_assert(e->type != PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
 	}
 
 	xe_eudebug_session_destroy(s);
@@ -4070,21 +4065,21 @@ static void test_single_step(int fd, struct drm_xe_engine_class_instance *hwe, u
 	data = online_debug_data_create(fd, hwe, flags);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_single_step_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_single_step_trigger);
 
 	xe_eudebug_session_run(s);
@@ -4094,13 +4089,17 @@ static void test_single_step(int fd, struct drm_xe_engine_class_instance *hwe, u
 }
 
 static void eu_debugger_ndetach_trigger(struct xe_eudebug_debugger *d,
-					struct drm_xe_eudebug_event *event)
+					struct prelim_drm_xe_eudebug_event *event)
 {
 	struct online_debug_data *data = d->ptr;
+	static int debugger_detach_count;
 
-	if (data->debugger_detach_count < (SHADER_LOOP_N - 1)) {
+	if (debugger_detach_count < (SHADER_LOOP_N - 1)) {
+		/* Make sure the resume command was issued before detaching the debugger */
+		if (data->last_eu_control_seqno > event->seqno)
+			return;
 		eu_debugger_detach_trigger(d, event);
-		data->debugger_detach_count++;
+		debugger_detach_count++;
 	} else {
 		igt_debug("Reached Nth breakpoint hence preventing the debugger detach\n");
 	}
@@ -4122,26 +4121,24 @@ static void test_debugger_reopen(int fd, struct drm_xe_engine_class_instance *hw
 
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_debugger_ndetach_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 	/* Per context debug */
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_debug_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					sync_host_resume_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 					eu_debugger_ndetach_trigger);
 
 
 	xe_eudebug_session_run(s);
-
-	igt_assert_f(data->debugger_detach_count > 0, "Expected debugger to detach at least once\n");
 
 	xe_eudebug_session_destroy(s);
 	online_debug_data_destroy(data);
@@ -4188,23 +4185,23 @@ static void test_caching(int fd, struct drm_xe_engine_class_instance *hwe, uint6
 	s->client = xe_eudebug_client_create_timeout(fd, run_online_client, flags, data, XE_EUDEBUG_DEFAULT_CACHING_TIMEOUT_SEC);
 	s->debugger = xe_eudebug_debugger_create(fd, flags, data);
 
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 					open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 					create_metadata_trigger);
-	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+	xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 					ufence_ack_trigger);
 
 	if (intel_gen_per_context_eudebug(fd)) {
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_resume_caching_trigger);
 	} else {
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 						eu_attention_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+		xe_eudebug_debugger_add_trigger(s->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 						sync_host_resume_caching_trigger);
 	}
 
@@ -4323,17 +4320,17 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 		data[i] = online_debug_data_create(fd, hwe[i], flags);
 		s[i] = xe_eudebug_session_create(fd, run_online_client, flags, data[i]);
 
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 						eu_attention_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 						save_first_exception_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 						ufence_ack_trigger);
 
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						save_first_exception_trigger);
 
 		igt_assert_eq(xe_eudebug_debugger_attach(s[i]->debugger, s[i]->client), 0);
@@ -4359,15 +4356,15 @@ static void test_many_sessions_on_tiles(int fd, bool multi_tile)
 
 				usleep(WORKLOAD_DELAY_US);
 				if (intel_gen_per_context_eudebug(fd)) {
-					struct drm_xe_eudebug_event_sync_host *seus;
-					seus = (struct drm_xe_eudebug_event_sync_host *)data[i]->exception_event;
+					struct prelim_drm_xe_eudebug_event_sync_host *seus;
+					seus = (struct prelim_drm_xe_eudebug_event_sync_host *)data[i]->exception_event;
 					eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd, seus->client_handle,
 						      seus->exec_queue_handle, seus->lrc_handle, NULL, 0);
 					free(seus);
 				}
 				else {
-					struct drm_xe_eudebug_event_eu_attention *eus;
-					eus = (struct drm_xe_eudebug_event_eu_attention *)data[i]->exception_event;
+					struct prelim_drm_xe_eudebug_event_eu_attention *eus;
+					eus = (struct prelim_drm_xe_eudebug_event_eu_attention *)data[i]->exception_event;
 					eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd,
 						      eus->client_handle, eus->exec_queue_handle,
 						      eus->lrc_handle, eus->bitmask, eus->bitmask_size);
@@ -4444,12 +4441,12 @@ static void test_breakpoint_many_contexts(int *fd)
 		data[i] = online_debug_data_create(*fd, hwe[i], flags);
 		s[i] = xe_eudebug_session_create(*fd, run_online_client, flags, data[i]);
 
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 						ufence_ack_trigger);
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						save_first_exception_trigger);
 
 		igt_assert_eq(xe_eudebug_debugger_attach(s[i]->debugger, s[i]->client), 0);
@@ -4462,8 +4459,8 @@ static void test_breakpoint_many_contexts(int *fd)
 		igt_assert(!wait_for_exception(data[i], STARTUP_TIMEOUT_MS));
 
 	for (i = n - 1; i >= 0; i--) {
-		struct drm_xe_eudebug_event_sync_host *eus =
-		(struct drm_xe_eudebug_event_sync_host *)data[i]->exception_event;
+		struct prelim_drm_xe_eudebug_event_sync_host *eus =
+		(struct prelim_drm_xe_eudebug_event_sync_host *)data[i]->exception_event;
 
 		eu_ctl_resume(s[i]->debugger->master_fd, s[i]->debugger->fd, eus->client_handle,
 			      eus->exec_queue_handle, eus->lrc_handle, NULL, 0);
@@ -4510,22 +4507,22 @@ static void test_interrupt_one_of_many_contexts(int *fd)
 		data[i] = online_debug_data_create(*fd, hwe[i], flags);
 		s[i] = xe_eudebug_session_create(*fd, run_online_client, flags, data[i]);
 
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_OPEN,
 						open_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
 						exec_queue_trigger);
 
 		/* Per context debug */
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_debug_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
 						sync_host_resume_trigger);
 
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM,
 						vm_open_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
 						create_metadata_trigger);
-		xe_eudebug_debugger_add_trigger(s[i]->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+		xe_eudebug_debugger_add_trigger(s[i]->debugger, PRELIM_DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
 						ufence_ack_trigger);
 
 		igt_assert_eq(xe_eudebug_debugger_attach(s[i]->debugger, s[i]->client), 0);
@@ -4544,7 +4541,7 @@ static void test_interrupt_one_of_many_contexts(int *fd)
 	pthread_mutex_unlock(&data[to_interrupt]->mutex);
 
 	for (i = 0; i < n; i++) {
-		struct drm_xe_eudebug_event *event = NULL;
+		struct prelim_drm_xe_eudebug_event *event = NULL;
 
 		set_steering_flag(data[i], STEERING_END_LOOP);
 
@@ -4556,7 +4553,7 @@ static void test_interrupt_one_of_many_contexts(int *fd)
 			online_session_check(s[i]);
 		} else {
 			xe_eudebug_for_each_event(event, s[i]->debugger->log)
-				if (event->type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST)
+				if (event->type == PRELIM_DRM_XE_EUDEBUG_EVENT_SYNC_HOST)
 					igt_fail_on_f(true, "Unexpected sync-host event!\n");
 		}
 
