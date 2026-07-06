@@ -356,6 +356,7 @@ intel_xe_progs = [
 ]
 
 intel_xe_eudebug_progs = [
+	'xe_eudebug',
 	'xe_exec_sip_eudebug',
 	'xe_eudebug_online',
 	'xe_eudebug_sriov',
