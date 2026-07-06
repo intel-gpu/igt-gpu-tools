@@ -253,6 +253,11 @@ if chamelium.found() or libtsi.found()
 	lib_sources += 'monitor_edids/monitor_edids_helper.c'
 endif
 
+if build_xe_eudebug
+	build_info += 'Xe EU debugger test framework enabled.'
+	lib_sources += 'xe/xe_eudebug.c'
+endif
+
 if get_option('srcdir') != ''
     srcdir = join_paths(get_option('srcdir'), 'tests')
 else
