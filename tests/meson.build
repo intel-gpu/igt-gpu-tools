@@ -355,6 +355,14 @@ intel_xe_progs = [
         'xe_tlb',
 ]
 
+intel_xe_eudebug_progs = [
+]
+
+if build_xe_eudebug
+	build_info += 'Xe EUdebug **experimental** tests enabled.'
+	intel_xe_progs += intel_xe_eudebug_progs
+endif
+
 chamelium_progs = [
 	'kms_chamelium_audio',
 	'kms_chamelium_color',
