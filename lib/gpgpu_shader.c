@@ -995,6 +995,34 @@ void gpgpu_shader__write_a64_d32(struct gpgpu_shader *shdr, uint64_t ppgtt_addr,
 // [11:9] Data Size: 2 (D32)
 // [5:0] Store Operation: 7
 (W)	send.ugm (1)		null	r30	r31:1	0x0	0x2020407
+//
+// dest data payload format is selected by Data Size.
+// Block Height x Block Width x Data size / GRF Register size
+//	=> 1 x 16 x 32bit / 512bit = 1
+// data payload format size is 1 GRF Register.
+//
+// send.ugm Untyped 2D Block Array Load
+// Format: send.ugm (1) dst src0 src1 ExtMsg MsgDesc
+// Execution Mask restriction: SIMT1
+//
+// Extended Message Descriptor (Dataport Extended Descriptor Imm 2D Block)
+// bspec: 67780
+// 0x0 =>
+// [32:22] Global Y_offset: 0
+// [21:12] Global X_offset: 0
+//
+// Message Descriptor
+// bspec: 63972
+// 0x2128403 =>
+// [30:29] Address Type: 0 (FLAT)
+// [28:25] Src0 Length: 1
+// [24:20] Dest Length: 1
+// [19:16] Cache : 2 (L1UC_L3UC) 10
+// [15] Transpose Block: 1
+// [11:9] Data Size: 2 (D32) 10
+// [7] VNNI Transform: 0
+// [5:0] Load Operation: 3 (Load 2D Block) 11
+(W)	send.ugm (1)		r31	r30	null	0x0	0x2128403
 #endif
 	)", lower_32_bits(addr), upper_32_bits(addr), value);
 }
