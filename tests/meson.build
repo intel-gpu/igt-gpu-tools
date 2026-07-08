@@ -365,6 +365,7 @@ if have_libnl
 endif
 
 intel_xe_eudebug_progs = [
+	'xe_eudebug_sriov',
 ]
 
 if build_xe_eudebug
