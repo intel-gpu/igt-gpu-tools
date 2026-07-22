@@ -79,6 +79,7 @@
 		    "include": [
 			{ "LNL": "../intel-ci/xe.lnl.core.blocklist.txt" },
 			{ "BMG": "../intel-ci/xe.bmg.core.blocklist.txt" },
+			{ "BMG": "../intel-ci/xe.kv6.17-only.blocklist.txt" },
 			{ "BMG-DKMS": "../intel-ci/xe.bmg.core.blocklist.txt" },
 			{ "BMG-DKMS": "../intel-ci/xe.bmg.dkms.blocklist.txt" },
 			{ "PTL": "../intel-ci/xe.ptl.core.blocklist.txt" },
