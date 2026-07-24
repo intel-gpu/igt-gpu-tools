@@ -52,16 +52,6 @@ igt@xe_eudebug_sriov@deny-eudebug
 igt@xe_oa@oa-tlb-invalidate
 igt@xe_oa@unprivileged-single-ctx-counters
 ##################################################################
-# Temporarily blocking the tests until we have
-# support for exhaustive eviction
-##################################################################
-igt@xe_evict@evict-(beng-)?cm-threads-large$
-igt@xe_evict@evict-(beng-)?mixed-many-threads-large$
-igt@xe_evict@evict-(beng-)?mixed-many-threads-small$
-igt@xe_evict@evict-(beng-)?mixed-threads-large$
-igt@xe_evict@evict-(beng-)?threads-large$
-igt@xe_evict@evict-(beng-)?large-multi-vm-cm$
-##################################################################
 # pxp support not available for BMG
 ##################################################################
 igt@xe_pxp@(?!pxp-bo-alloc$|pxp-queue-alloc$).*
