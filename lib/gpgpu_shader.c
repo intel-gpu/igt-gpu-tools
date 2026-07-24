@@ -254,7 +254,8 @@ __xe3p_gpgpu_execfunc(struct intel_bb *ibb,
 	/* Inline data is at 32th dword of COMPUTE_WALKER_2 */
 	inline_data = intel_bb_ptr(ibb) + 4 * 32;
 	/* Pass a value of "SIMD_SIZE(16) * x_dim" as the argument for width */
-	xe3p_emit_compute_walk2(ibb, 0, 0, x_dim * 16, y_dim, &idd, x_dim * y_dim, NULL);
+	xe3p_emit_compute_walk2(ibb, 0, 0, x_dim * 16, y_dim, &idd,
+				xe_query_eu_thread_count(ibb->fd, 0), NULL);
 	fill_inline_data(inline_data, xe_canonical_va(ibb->fd, target->addr.offset), target, x_dim);
 
 	intel_bb_out(ibb, MI_BATCH_BUFFER_END);
