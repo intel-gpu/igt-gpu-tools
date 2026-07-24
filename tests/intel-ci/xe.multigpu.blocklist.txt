@@ -2,7 +2,3 @@
 # Blocklist for Xe MuitiGPU tests
 #####################################################
 igt@(?!.*xe.*multigpu.*|xe_peer2peer.*).*
-#####################################################
-# Kernel support not available
-#####################################################
-igt@xe_eudebug@multigpu-basic-client*
