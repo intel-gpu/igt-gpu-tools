@@ -154,6 +154,7 @@ struct drm_xe_eudebug_event {
 #define DRM_XE_EUDEBUG_EVENT_METADATA		9
 #define DRM_XE_EUDEBUG_EVENT_VM_BIND_OP_METADATA 10
 #define DRM_XE_EUDEBUG_EVENT_PAGEFAULT		11
+#define DRM_XE_EUDEBUG_EVENT_SYNC_HOST		12
 
 	__u16 flags;
 #define DRM_XE_EUDEBUG_EVENT_CREATE		(1 << 0)
@@ -206,6 +207,7 @@ struct drm_xe_eudebug_eu_control {
 #define DRM_XE_EUDEBUG_EU_CONTROL_CMD_INTERRUPT_ALL	0
 #define DRM_XE_EUDEBUG_EU_CONTROL_CMD_STOPPED		1
 #define DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME		2
+#define DRM_XE_EUDEBUG_EU_CONTROL_CMD_UNLOCK		3
 	__u32 cmd;
 	__u32 flags;
 
@@ -346,6 +348,13 @@ struct drm_xe_eudebug_event_pagefault {
 	__u32 bitmask_size;
 	__u64 pagefault_address;
 	__u8 bitmask[];
+};
+
+struct drm_xe_eudebug_event_sync_host {
+	struct drm_xe_eudebug_event base;
+	__u64 client_handle;
+	__u64 exec_queue_handle;
+	__u64 lrc_handle;
 };
 
 #if defined(__cplusplus)
