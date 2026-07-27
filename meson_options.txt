@@ -42,6 +42,11 @@ option('xe_driver',
        value : 'enabled',
        description : 'Build tests for Xe driver')
 
+option('xe_eudebug',
+       type : 'feature',
+       value : 'disabled',
+       description : 'Build library and tests for Xe EU debugger')
+
 option('vmtb',
        type : 'feature',
        value : 'disabled',
