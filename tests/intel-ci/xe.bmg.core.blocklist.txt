@@ -17,6 +17,7 @@ igt@xe_media_fill@media-fill
 # Expected skip on xe1 & xe2 Platforms
 ##################################################################
 igt@xe_pat@pat-index-xe3p-xpc
+igt@xe_gpgpu_fill@offset-4x4
 ##################################################################
 # Expected skip - small bar not supported
 ##################################################################
@@ -30,6 +31,7 @@ igt@xe_pm@.*d3cold.*
 # which have more than 1 COMPUTE ENGINE instance per tile.
 ##################################################################
 igt@xe_compute@ccs-mode-basic
+igt@xe_compute@eu-busy-10s
 ##################################################################
 # Expected skip as tests not applicable for the platform
 ##################################################################
@@ -64,3 +66,18 @@ igt@xe_pm@d3hot-i2c
 # Hugepages tests needs extra setting in CI
 # echo 128 >  /proc/sys/vm/nr_hugepages
 ##################################################################
+# Expected skip as tests not applicable for BMG
+##################################################################
+igt@xe_non_msix@walker-interrupt-notification-non-msix
+igt@xe_pat@xa-app-transient-media-(?:on|off)
+igt@xe_prefetch_fault@prefetch-fault(?:-svm)?
+igt@xe_pat@l2-flush-opt-svm-pat-restrict
+#####################################################################
+#page reclaim/page reclaim hw assist support is not available for BMG
+#####################################################################
+igt@xe_page_reclaim@.*
+####################################################################
+#many Tiles are not present in BMG
+####################################################################
+igt@xe_eudebug_online@breakpoint-many-sessions-tiles
+####################################################################
