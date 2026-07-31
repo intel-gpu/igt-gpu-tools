@@ -78,3 +78,16 @@ igt@xe_page_reclaim@.*
 ####################################################################
 igt@xe_eudebug_online@breakpoint-many-sessions-tiles
 ####################################################################
+# Module load already happens in the setup phase
+####################################################################
+igt@xe_module_load@load
+####################################################################
+# MultiGPU is a separate config
+####################################################################
+igt@(.*multigpu.*|xe_peer2peer.*).*
+####################################################################
+# Expected behavior - CCS mode enabled only for platforms
+# which have more than 1 COMPUTE ENGINE instance per tile.
+####################################################################
+igt@xe_compute@ccs-mode-compute-kernel
+####################################################################
