@@ -9,7 +9,6 @@ igt@xe_module_load@.*
 # tests applicable for PF only
 #
 igt@sriov_basic.*
-igt@xe_eudebug_sriov.*
 igt@xe_pmu@.*engine-activity-.*
 igt@xe_pmu@gt-c6-idle
 igt@xe_sriov.*
@@ -72,11 +71,11 @@ igt@intel_hwmon@hwmon-(read|write)
 #
 igt@xe_live_ktest.*
 #
-# driver rejects attempts to set wedged_mode=2 on a VF
+#EUdebug not supported in VF
+igt@(xe.eudebug.|xe_exec_sip.).*
 #
-igt@xe_wedged@wedged-at-any-timeout
-igt@xe_wedged@wedged-mode-toggle
+#driver rejects attempts to set wedged_mode=2 on a VF
+igt@xe_wedged@wedged.*
 #
-# On VF HW PAT may not be readable
-#
+#HW PAT may not be readable on VF
 igt@xe_pat@pat-sw-hw.*
