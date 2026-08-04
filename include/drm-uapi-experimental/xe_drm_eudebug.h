@@ -56,6 +56,7 @@ struct drm_xe_vm_bind_op_ext_attach_debug {
 
 #define   DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG		7
 #define     DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE		(1 << 0)
+#define     DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_PAGEFAULT_ENABLE	(1 << 1)
 
 /* ... */
 
