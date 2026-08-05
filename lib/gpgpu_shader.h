@@ -53,6 +53,8 @@ __emit_iga64_code(struct gpgpu_shader *shdr, const struct iga64_template *tpls,
 	__emit_iga64_code(__shdr, iga64_code_ ## __name, ARRAY_SIZE(args), args); \
 })
 
+uint64_t get_bitfield(void *ptr, uint16_t last, uint16_t first);
+void set_bitfield(void *ptr, uint16_t last, uint16_t first, uint64_t val);
 struct gpgpu_shader *gpgpu_shader_create(int fd);
 void gpgpu_shader_destroy(struct gpgpu_shader *shdr);
 
