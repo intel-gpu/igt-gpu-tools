@@ -40,6 +40,23 @@ static void gpgpu_shader_extend(struct gpgpu_shader *shdr)
 	igt_assert(shdr->code);
 }
 
+#define BIT128(x) ((__uint128_t)1 << (x))
+#define GENMASK128(_last, _first) ((BIT128(_last) << 1) - BIT128(_first))
+
+uint64_t get_bitfield(void *ptr, uint16_t last, uint16_t first)
+{
+	return ((*(__uint128_t *)ptr) >> first) & GENMASK128(last - first, 0);
+}
+
+void set_bitfield(void *ptr, uint16_t last, uint16_t first, uint64_t val)
+{
+	__uint128_t *d = ptr;
+
+	*d &= ~GENMASK128(last, first);
+	igt_warn_on(((__uint128_t)val << first) & ~GENMASK128(last, first));
+	*d |= ((__uint128_t)val << first) & GENMASK128(last, first);
+}
+
 uint32_t
 __emit_iga64_code(struct gpgpu_shader *shdr, struct iga64_template const *tpls,
 		  int argc, uint32_t *argv)
