@@ -2863,8 +2863,12 @@ static void pagefault_trigger(struct xe_eudebug_debugger *d,
  * SUBTEST: breakpoint-not-in-debug-mode
  * Functionality: EU attention event
  * Description:
- *	Check whether KMD resets the GPU when it spots an attention
- *	coming from workload not in debug mode.
+ *	On pre-Xe3p, check whether KMD resets the GPU when it spots
+ *	an attention coming from workload not in debug mode.
+ *	On Xe3p+ (per-context debug), verify that a breakpoint fires
+ *	but the stopped thread cannot be serviced because GuC does not
+ *	notify the host. Confirm by reading AIP from target surface,
+ *	then reset GT to recover.
  *
  * SUBTEST: stopped-thread
  * Functionality: EU attention event
@@ -2907,6 +2911,57 @@ static void test_basic_online(int fd, struct drm_xe_engine_class_instance *hwe, 
 
 	xe_eudebug_session_run(s);
 	online_session_check(s);
+
+	xe_eudebug_session_destroy(s);
+	online_debug_data_destroy(data);
+}
+
+static void test_breakpoint_not_debuggable_per_context_debug(int fd,
+						 struct drm_xe_engine_class_instance *hwe,
+						 uint64_t flags)
+{
+	struct xe_eudebug_session *s;
+	struct online_debug_data *data;
+	uint32_t aip = 0;
+
+	data = online_debug_data_create(fd, hwe, flags);
+	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
+	s->client->allow_dead_client = true;
+
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM,
+					vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+					create_metadata_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+					ufence_ack_trigger);
+
+	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
+	xe_eudebug_debugger_start_worker(s->debugger);
+	xe_eudebug_client_start(s->client);
+
+	igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
+		pthread_mutex_lock(&data->mutex);
+		if (data->vm_fd >= 0 && data->target_offset) {
+			fsync(data->vm_fd);
+			aip = vm_read_target_u32(data, 0);
+		} else {
+			aip = 0;
+		}
+		pthread_mutex_unlock(&data->mutex);
+
+		if (aip && aip != SHADER_CANARY)
+			break;
+		usleep(10000);
+	}
+
+	igt_assert_f(aip && aip != SHADER_CANARY, "Breakpoint not hit: AIP=0x%08x\n", aip);
+	igt_info("Breakpoint hit confirmed, AIP=0x%08x. Resetting GT.\n", aip);
+
+	/* Reset GT to unblock stuck threads */
+	xe_force_gt_reset_async(fd, data->hwe.gt_id);
+
+	xe_eudebug_client_wait_done(s->client);
+	xe_eudebug_debugger_stop_worker(s->debugger);
 
 	xe_eudebug_session_destroy(s);
 	online_debug_data_destroy(data);
@@ -4531,7 +4586,11 @@ int igt_main()
 							   SHADER_NOP | TRIGGER_UFENCE_SET_BREAKPOINT);
 
 	test_gt_render_or_compute("breakpoint-not-in-debug-mode", fd, hwe)
-		test_basic_online(fd, hwe, SHADER_BREAKPOINT | DISABLE_DEBUG_MODE);
+		if (gen < 35)
+			test_basic_online(fd, hwe, SHADER_BREAKPOINT | DISABLE_DEBUG_MODE);
+		else
+			test_breakpoint_not_debuggable_per_context_debug(fd, hwe,
+				SHADER_BREAKPOINT | DISABLE_DEBUG_MODE);
 
 	test_gt_render_or_compute("stopped-thread", fd, hwe)
 		test_basic_online(fd, hwe, SHADER_BREAKPOINT | TRIGGER_RESUME_DELAYED);
