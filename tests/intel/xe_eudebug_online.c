@@ -324,6 +324,15 @@ static int eu_attentions_xor_count(const uint32_t *a, const uint32_t *b, uint32_
 	return count;
 }
 
+static bool eu_attention_bitmask_is_subset(const uint8_t *sub, const uint8_t *super, int size)
+{
+	for (int i = 0; i < size; i++)
+		if (sub[i] & ~super[i])
+			return false;
+
+	return true;
+}
+
 static int count_canaries_eq(uint32_t *ptr, struct dim_t w_dim, uint32_t value)
 {
 	int count = 0;
@@ -1373,6 +1382,7 @@ static void online_session_check(struct xe_eudebug_session *s, int flags)
 {
 	struct prelim_drm_xe_eudebug_event_eu_attention *ea = NULL;
 	struct prelim_drm_xe_eudebug_event_pagefault *pf = NULL;
+	struct prelim_drm_xe_eudebug_event_eu_attention *prev_ea = NULL;
 	struct prelim_drm_xe_eudebug_event *event = NULL;
 	struct online_debug_data *data = s->client->ptr;
 	bool expect_exception = flags & DISABLE_DEBUG_MODE ? false : true;
@@ -1392,8 +1402,20 @@ static void online_session_check(struct xe_eudebug_session *s, int flags)
 
 			igt_assert(event->flags == PRELIM_DRM_XE_EUDEBUG_EVENT_STATE_CHANGE);
 			igt_assert_eq(ea->bitmask_size, bitmask_size);
-			sum += igt_bitmap_hweight(ea->bitmask, bitmask_size * 8);
 			igt_assert(match_attention_with_exec_queue(s->debugger->log, ea));
+
+			/*
+			 * Attention is level-triggered: if this event is a
+			 * superset of the previous one, count only the newly
+			 * stopped threads; otherwise count them all.
+			 */
+			if (prev_ea && eu_attention_bitmask_is_subset(prev_ea->bitmask, ea->bitmask, bitmask_size))
+				sum += eu_attentions_xor_count((uint32_t *)ea->bitmask,
+							       (uint32_t *)prev_ea->bitmask, bitmask_size);
+			else
+				sum += igt_bitmap_hweight(ea->bitmask, bitmask_size * 8);
+
+			prev_ea = ea;
 		} else if (event->type == PRELIM_DRM_XE_EUDEBUG_EVENT_PAGEFAULT) {
 			uint32_t after_offset = bitmask_size / sizeof(uint32_t);
 			uint32_t resolved_offset = bitmask_size / sizeof(uint32_t) * 2;
