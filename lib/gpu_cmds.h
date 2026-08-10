@@ -176,11 +176,7 @@ xe3p_emit_compute_walk2(struct intel_bb *ibb,
 
 void
 xe3p_emit_fill_compute_walk2(struct intel_bb *ibb,
-			     unsigned int buf_width, unsigned int buf_height,
-			     uint64_t buf_addr,
-			     unsigned int x, unsigned int y,
-			     unsigned int width, unsigned int height,
-			     struct xe3p_interface_descriptor_data *pidd,
-			     uint8_t color);
+			     struct compute_walker2_inline_data *idata,
+			     struct xe3p_interface_descriptor_data *pidd);
 
 #endif /* GPU_CMDS_H */
