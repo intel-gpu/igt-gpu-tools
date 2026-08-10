@@ -276,4 +276,23 @@ struct xehp_surface_state {
 	} ss15;
 };
 
+struct compute_walker2_inline_data {
+	union {
+		uint32_t dw[16];
+
+		struct {
+			uint64_t addr;			/* buffer addr */
+			uint32_t addr_lo;		/* buffer addr lo */
+			uint32_t addr_hi;		/* buffer addr hi */
+			uint32_t color;			/* color for gpgpu fill */
+			uint32_t width;			/* buffer width */
+			uint32_t height;		/* buffer height */
+			uint32_t rect_width;		/* operating rect width */
+			uint32_t rect_height;		/* operating rect height */
+			uint32_t rect_x;		/* rect x-position */
+			uint32_t rect_y;		/* rect y-position */
+		} fill;
+	};
+};
+
 #endif /* XEHP_MEDIA_H */
