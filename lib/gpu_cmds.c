@@ -1486,20 +1486,18 @@ xe3p_emit_compute_walk2(struct intel_bb *ibb,
 
 void
 xe3p_emit_fill_compute_walk2(struct intel_bb *ibb,
-			     unsigned int buf_width, unsigned int buf_height,
-			     uint64_t buf_addr,
-			     unsigned int x, unsigned int y,
-			     unsigned int width, unsigned int height,
-			     struct xe3p_interface_descriptor_data *pidd,
-			     uint8_t color)
+			     struct compute_walker2_inline_data *idata,
+			     struct xe3p_interface_descriptor_data *pidd)
 {
 	struct xe3p_cw2_gpgpu_fill_data filldata = {
-		.buf_width = buf_width,
-		.buf_height = buf_height,
-		.buf_addr = buf_addr,
-		.color = color,
+		.buf_width = idata->fill.width,
+		.buf_height = idata->fill.height,
+		.buf_addr = idata->fill.addr,
+		.color = idata->fill.color,
 	};
 
-	__xe3p_emit_compute_walk2(ibb, x, y, width, height,
+	__xe3p_emit_compute_walk2(ibb,
+				  idata->fill.rect_x, idata->fill.rect_y,
+				  idata->fill.rect_width, idata->fill.rect_height,
 				  pidd, 64, NULL, &filldata);
 }

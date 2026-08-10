@@ -490,6 +490,7 @@ void xe3p_gpgpu_fillfunc(int fd,
 	struct intel_bb *ibb;
 	struct gpgpu_shader *kernel;
 	struct xe3p_interface_descriptor_data idd;
+	struct compute_walker2_inline_data idata;
 
 	ibb = intel_bb_create(fd, PAGE_SIZE);
 	intel_bb_add_intel_buf(ibb, buf, true);
@@ -507,9 +508,18 @@ void xe3p_gpgpu_fillfunc(int fd,
 		  PIPELINE_SELECT_GPGPU);
 	xe3p_emit_state_base_address(ibb);
 	xehp_emit_state_compute_mode(ibb, kernel);
-	xe3p_emit_fill_compute_walk2(ibb, buf->width * buf->bpp / 8, buf->height,
-				     xe_canonical_va(fd, buf->addr.offset),
-				     x, y, width, height, &idd, color);
+
+	idata.fill.addr = xe_canonical_va(fd, buf->addr.offset);
+	idata.fill.addr_lo = (uint32_t) xe_canonical_va(fd, buf->addr.offset);
+	idata.fill.addr_hi = (uint32_t) (xe_canonical_va(fd, buf->addr.offset) >> 32);
+	idata.fill.color = (uint32_t) color;
+	idata.fill.width = buf->width * buf->bpp / 8;
+	idata.fill.height = buf->height;
+	idata.fill.rect_width = width;
+	idata.fill.rect_height = height;
+	idata.fill.rect_x = x;
+	idata.fill.rect_y = y;
+	xe3p_emit_fill_compute_walk2(ibb, &idata, &idd);
 
 	intel_bb_out(ibb, MI_BATCH_BUFFER_END);
 	intel_bb_ptr_align(ibb, 32);
