@@ -81,7 +81,7 @@ static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 
 	if (intel_gen_per_context_eudebug(fd)) {
 		if (shader_type == SHADER_BREAKPOINT)
-			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
+			shader->exception_config |= SHADER_EXCEPTION_BREAKPOINT;
 	}
 
 	gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);

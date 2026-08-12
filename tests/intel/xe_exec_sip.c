@@ -57,8 +57,6 @@ enum sip_type {
 #define OOB_STATUS BIT(27)
 #define ILLEGAL_OPCODE_STATUS BIT(28)
 
-#define STATE_COMPUTE_MODE_ENABLE_OOB BIT(7)
-
 static struct intel_buf *
 create_fill_buf(int fd, int width, int height, uint8_t color)
 {
@@ -85,9 +83,9 @@ static struct gpgpu_shader *get_shader(int fd, enum shader_type shader_type)
 
 	shader = gpgpu_shader_create(fd);
 	if (shader_type == SHADER_INV_INSTR_WALKER_ENABLED)
-		shader->illegal_opcode_exception_enable = true;
+		shader->exception_config |= SHADER_EXCEPTION_INVALID_INSTR;
 	else if (shader_type == SHADER_OOB_EXCEPTION_MODE_ENABLED)
-		shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_OOB;
+		shader->exception_config |= SHADER_EXCEPTION_OOB;
 
 	switch (shader_type) {
 	case SHADER_HANG:
