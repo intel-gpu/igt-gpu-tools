@@ -102,6 +102,11 @@ static void emit_sip(struct intel_bb *ibb, const uint64_t offset)
 	intel_bb_out(ibb, upper_32_bits(offset));
 }
 
+static bool should_enable_illegal_opcode_exception(struct gpgpu_shader *shdr)
+{
+	return shdr->exception_config & SHADER_EXCEPTION_INVALID_INSTR;
+}
+
 static void
 __xelp_gpgpu_execfunc(struct intel_bb *ibb,
 		      struct intel_buf *target,
@@ -122,7 +127,7 @@ __xelp_gpgpu_execfunc(struct intel_bb *ibb,
 							      shdr->instr,
 							      4 * shdr->size);
 	idd = intel_bb_ptr_get(ibb, interface_descriptor);
-	idd->desc2.illegal_opcode_exception_enable = shdr->illegal_opcode_exception_enable;
+	idd->desc2.illegal_opcode_exception_enable = should_enable_illegal_opcode_exception(shdr);
 	idd->desc6.num_threads_in_tg = shdr->num_threads_in_tg;
 
 	if (sip && sip->size)
@@ -186,7 +191,7 @@ __xehp_gpgpu_execfunc(struct intel_bb *ibb,
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
 
 	xehp_fill_interface_descriptor(ibb, target, shdr, &idd);
-	idd.desc2.illegal_opcode_exception_enable = shdr->illegal_opcode_exception_enable;
+	idd.desc2.illegal_opcode_exception_enable = should_enable_illegal_opcode_exception(shdr);
 	idd.desc5.num_threads_in_tg = shdr->num_threads_in_tg;
 
 	if (sip && sip->size)
@@ -235,7 +240,7 @@ __xe3p_gpgpu_execfunc(struct intel_bb *ibb,
 	intel_bb_add_intel_buf(ibb, target, true);
 	intel_bb_ptr_set(ibb, BATCH_STATE_SPLIT);
 	xe3p_fill_interface_descriptor(ibb, shdr, &idd);
-	idd.dw02.illegal_opcode_exception_enable = shdr->illegal_opcode_exception_enable;
+	idd.dw02.illegal_opcode_exception_enable = should_enable_illegal_opcode_exception(shdr);
 	if (sip && sip->size)
 		sip_offset = fill_sip(ibb, sip->instr, 4 * sip->size);
 	else
@@ -350,7 +355,6 @@ struct gpgpu_shader *gpgpu_shader_create(int fd)
 	shdr->large_grf_mode = false;
 	shdr->simd_size = 16;  /* Default SIMD size */
 	shdr->hw_local_id_generation = false;
-	shdr->exceptions = 0xffff0000;
 	igt_assert(shdr->code);
 
 	return shdr;
