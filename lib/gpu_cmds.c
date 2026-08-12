@@ -1081,6 +1081,30 @@ xehp_emit_cfe_state(struct intel_bb *ibb, uint32_t threads)
 	intel_bb_out(ibb, 0);
 }
 
+static uint32_t calculate_state_compute_mode_exceptions(struct gpgpu_shader *shdr)
+{
+	static const uint32_t STATE_COMPUTE_MODE_ENABLE_FE_FEH = BIT(15);
+	static const uint32_t STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS = BIT(14);
+	static const uint32_t STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION = BIT(13);
+	static const uint32_t STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION = BIT(9);
+	static const uint32_t STATE_COMPUTE_MODE_ENABLE_OOB = BIT(7);
+	uint32_t exceptions = 0xffff0000;
+
+	if (shdr->exception_config & SHADER_EXCEPTION_BREAKPOINT)
+		exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
+	if (shdr->exception_config & SHADER_EXCEPTION_FE_FEH)
+		exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
+	if (shdr->exception_config & SHADER_EXCEPTION_PAGEFAULT)
+		exceptions |= (STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION |
+			       STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION);
+	if (shdr->exception_config & SHADER_MEMORY_EXCEPTION)
+		exceptions |= STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION;
+	if (shdr->exception_config & SHADER_EXCEPTION_OOB)
+		exceptions |= STATE_COMPUTE_MODE_ENABLE_OOB;
+
+	return exceptions;
+}
+
 void xehp_emit_state_compute_mode(struct intel_bb *ibb, struct gpgpu_shader *shdr)
 {
 	static const uint32_t STATE_COMPUTE_MODE_DW1_ENABLE_VRT = REG_BIT(10);
@@ -1097,7 +1121,7 @@ void xehp_emit_state_compute_mode(struct intel_bb *ibb, struct gpgpu_shader *shd
 	intel_bb_out(ibb, dw1);
 
 	if (dword_length)
-		intel_bb_out(ibb, shdr->exceptions);
+		intel_bb_out(ibb, calculate_state_compute_mode_exceptions(shdr));
 }
 
 void
