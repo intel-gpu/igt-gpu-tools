@@ -11,6 +11,12 @@
 #include <stdlib.h>
 
 #define GENISA_BF_DBG_EXCEPTION		REG_BIT(30)
+#define SHADER_EXCEPTION_BREAKPOINT	BIT(5)
+#define SHADER_EXCEPTION_FE_FEH		BIT(6)
+#define SHADER_EXCEPTION_PAGEFAULT	BIT(7)
+#define SHADER_EXCEPTION_INVALID_INSTR	BIT(8)
+#define SHADER_MEMORY_EXCEPTION		BIT(9)
+#define SHADER_EXCEPTION_OOB		BIT(10)
 
 struct intel_bb;
 struct intel_buf;
@@ -24,7 +30,7 @@ struct gpgpu_shader {
 		uint32_t (*instr)[4];
 	};
 	struct igt_map *labels;
-	uint32_t exceptions;
+	uint32_t exception_config;
 	bool illegal_opcode_exception_enable;
 	uint32_t num_threads_in_tg;
 	bool large_grf_mode;

@@ -752,11 +752,6 @@ WAIT_HOST:
 	)");
 }
 
-#define STATE_COMPUTE_MODE_ENABLE_FE_FEH               BIT(15)
-#define STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS          BIT(14)
-#define STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION     BIT(13)
-#define STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION BIT(9)
-
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
 	struct dim_t w_dim = walker_dimensions(data->thread_count);
@@ -778,19 +773,18 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 		if (data->flags & (SHADER_BREAKPOINT | TRIGGER_RESUME_SET_BP | SHADER_SINGLE_STEP |
 		    SHADER_N_NOOP_BREAKPOINT | TRIGGER_UFENCE_SET_BREAKPOINT | SHADER_CACHING_SRAM |
 		    SHADER_CACHING_VRAM))
-			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_BREAKPOINTS;
+			shader->exception_config |= SHADER_EXCEPTION_BREAKPOINT;
 		if (data->flags & SHADER_LOOP)
-			shader->exceptions |= STATE_COMPUTE_MODE_ENABLE_FE_FEH;
+			shader->exception_config |= SHADER_EXCEPTION_FE_FEH;
 		if (data->flags & SHADER_PAGEFAULT)
-			shader->exceptions |= (STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION |
-					       STATE_COMPUTE_MODE_ENABLE_PAGE_FAULT_EXCEPTION);
+			shader->exception_config |= SHADER_EXCEPTION_PAGEFAULT;
 
 		if (data->flags & DISABLE_EXCEPTIONS)
-			shader->exceptions &= ~0xffff;
+			shader->exception_config = 0;
 	}
 
 	if ((data->flags & SHADER_PAGEFAULT) &&
-	    (shader->exceptions & STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION)) {
+	    (shader->exception_config & SHADER_EXCEPTION_PAGEFAULT)) {
 		if (data->flags & SHADER_PAGEFAULT_READ)
 			emit_e64b_read_page_fault(shader, pf_addr);
 		else if (data->flags & SHADER_PAGEFAULT_WRITE)
@@ -831,7 +825,7 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__breakpoint(shader);
 	} else if ((data->flags & SHADER_PAGEFAULT) &&
-		   !(shader->exceptions & STATE_COMPUTE_MODE_ENABLE_MEMORY_EXCEPTION)) {
+		   !(shader->exception_config & SHADER_EXCEPTION_PAGEFAULT)) {
 		if (data->flags & SHADER_PAGEFAULT_READ)
 			gpgpu_shader__read_a64_d32(shader, BAD_OFFSET);
 		else if (data->flags & SHADER_PAGEFAULT_WRITE)
