@@ -1,5 +1,9 @@
-###########################################################################
-# Blocklisting Reload/Unload tests (DKMS, KV6.6) to unblock shard execution
-###########################################################################
-igt@xe_module_load@unload
-igt@xe_module_load@(reload(-no-display)?|many-reload)$
+#####################################################################
+#Tests are expected to be skipped, because the required kernel
+#CONFIG_FAULT_INJECTION configuration is not enabled in the production
+#kernel cofiguration.
+######################################################################
+igt@xe_fault_injection@*
+igt@xe_survivability@runtime-survivability
+igt@xe_wedged@basic-wedged
+##################################################################

@@ -79,3 +79,6 @@ igt@xe_wedged@wedged.*
 #
 #HW PAT may not be readable on VF
 igt@xe_pat@pat-sw-hw.*
+#
+#context restore is not supported on VF
+igt@xe_configfs@ctx-restore-(mid|post)-bb(-invalid)?
