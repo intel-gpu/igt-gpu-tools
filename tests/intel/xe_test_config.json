@@ -87,6 +87,8 @@
 			{ "BMG-DKMS_KV5.15": "../intel-ci/xe.dkms_kv5.15.blocklist.txt" },
 			{ "BMG-DKMS_KV5.15": "../intel-ci/xe.bmg.core.blocklist.txt" },
 			{ "BMG-DKMS_KV5.15": "../intel-ci/xe.bmg.dkms.blocklist.txt" },
+			{ "CRI": "../intel-ci/xe.cri.core.blocklist.txt" },
+			{ "NVL": "../intel-ci/xe.nvl.core.blocklist.txt" },
 			{ "PTL": "../intel-ci/xe.ptl.core.blocklist.txt" },
 			{ "EUDEBUG-LNL": "../intel-ci/xe.lnl.eudebug.blocklist.txt" },
 			{ "EUDEBUG-BMG": "../intel-ci/xe.bmg.eudebug.blocklist.txt" },
