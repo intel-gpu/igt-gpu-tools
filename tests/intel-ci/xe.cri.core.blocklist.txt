@@ -1,0 +1,53 @@
+##################################################################
+# Valid skip: Display tests not valid for headless configuration
+##################################################################
+igt@.*kms.*
+igt@testdisplay
+igt@xe_pat@display-vs-wb-transient
+igt@fbdev@.*
+##################################################################
+# Valid skip: Features / hardware blocks not present on CRI
+#   - xe_huc_copy@: No HuC support on CRI.
+#   - xe_oa@oa-tlb-invalidate: valid only for older gen12 platforms.
+#   - xe_pxp@.*: No PXP (Protected Xe Path) support on CRI.
+##################################################################
+igt@xe_huc_copy@.*
+igt@xe_oa@oa-tlb-invalidate
+igt@xe_pxp@.*
+##################################################################
+# Valid skip: multigpu runs in separate config
+##################################################################
+igt@.*@.*multigpu.*
+igt@xe_peer2peer@.*
+#################################################################
+# Valid skip: No render engine support on CRI
+##################################################################
+igt@.*render.*
+##################################################################
+# Valid skip: PAT index tests targeting older/different platforms
+##################################################################
+igt@xe_pat@pat-index-xehpc
+igt@xe_pat@pat-index-xelp
+igt@xe_pat@pat-index-xelpg
+igt@xe_pat@pat-index-xe2
+##################################################################
+# Valid skip: Post DG2 there is no media pipeline
+##################################################################
+igt@xe_media_fill@media-fill
+##################################################################
+# Valid skip: No support for Compression on CRI
+##################################################################
+igt@xe_ccs@.*
+igt@xe_evict_ccs@.*
+##################################################################
+# Valid skip: Threadgroup-preemption not supported on CRI
+##################################################################
+igt@xe_compute_preempt@compute-threadgroup-preempt
+##################################################################
+# Valid skip: Tests requiring multiple CCS (Compute Command
+# Streamers) engines — CRI exposes only a single CCS engine.
+##################################################################
+igt@xe_compute@ccs-mode-basic
+igt@xe_compute@ccs-mode-compute-kernel
+igt@xe_compute@eu-busy-10s
+##################################################################
