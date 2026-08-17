@@ -2018,6 +2018,7 @@ static char *get_card_name(int fd, char *card_name, size_t len)
 
 	return card_name;
 }
+
 /**
  * __xe_eudebug_enable_getset
  * @fd: xe client
