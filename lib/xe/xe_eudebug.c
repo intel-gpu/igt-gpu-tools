@@ -514,8 +514,11 @@ static void read_all(int fd, void *buf, size_t nbytes)
 	igt_assert_eq(current_size, nbytes);
 }
 
-static void event_log_read_from_fd(struct xe_eudebug_event_log *l, int fd)
+static void xe_eudebug_client_read_log(struct xe_eudebug_client *c)
 {
+	struct xe_eudebug_event_log *l = c->log;
+	int fd = c->p_out[0];
+
 	read_all(fd, &l->head, sizeof(l->head));
 	igt_assert_lt(l->head, l->max_size);
 
@@ -1778,11 +1781,12 @@ void xe_eudebug_client_start(struct xe_eudebug_client *c)
  */
 void xe_eudebug_client_wait_done(struct xe_eudebug_client *c)
 {
-	if (!c->done) {
-		c->seqno = wait_from_client(c, CLIENT_FINI);
-		event_log_read_from_fd(c->log, c->p_out[0]);
-		c->done = 1;
-	}
+	if (c->done)
+		return;
+	c->seqno = wait_from_client(c, CLIENT_FINI);
+	if (c->seqno != DEAD_CLIENT)
+		xe_eudebug_client_read_log(c);
+	c->done = 1;
 }
 
 /**
