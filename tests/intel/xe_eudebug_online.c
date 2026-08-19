@@ -2249,11 +2249,25 @@ static void eu_attention_debugger_detach_trigger(struct xe_eudebug_debugger *d,
 	 */
 	reset_debugger_log(d);
 
-	/* Discovery worker will replay events that have occurred, which leads to
-	 * a vm event being sent and vm_open_trigger being re-run, which would lead
-	 * to us trying to open a removed vm. Thus, remove this trigger from list.
+	/* interrupt-reconnect:
+	 * 1st eudebug will disconnect causing GT reset.
+	 * When 2nd eudebug is connected client exits.
+	 *
+	 * Discovery process (2nd eudebug) in KMD blocks
+	 * client exit. This will result in full set of
+	 * create events.
+	 * However as soon as discovery is done, client will
+	 * exit and there will be destroy events in the queue.
+	 *
+	 * Our test framework reads events one by one and
+	 * can perform dedicated action.
+	 * For interrupt-reconnect for the second debugger remove
+	 * triggers that are performing actions as we know the
+	 * resources may be already removed.
 	 */
 	xe_eudebug_debugger_remove_trigger(d, PRELIM_DRM_XE_EUDEBUG_EVENT_VM, vm_open_trigger);
+	xe_eudebug_debugger_remove_trigger(d, PRELIM_DRM_XE_EUDEBUG_EVENT_METADATA,
+					   create_metadata_trigger);
 
 	ret = xe_eudebug_debugger_reattach(d, c_pid);
 	igt_assert_eq(ret, 0);
