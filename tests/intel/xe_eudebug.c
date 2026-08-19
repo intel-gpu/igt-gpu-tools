@@ -1273,6 +1273,7 @@ static void test_race_discovery(int fd, uint64_t flags, int clients)
 	if (flags & DISCOVERY_SIGINT) {
 		sleep(2);
 		sessions[0].client->done = 1;
+		sessions[0].client->allow_dead_client = 1;
 		kill(sessions[0].client->pid, SIGINT);
 	}
 
