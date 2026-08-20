@@ -2143,7 +2143,10 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	uint32_t val, cur_ip = 0, next_bp;
 	int cur_instr;
 	int ret;
+	uint64_t seqno = 0;
 
+	if (data->last_eu_control_seqno > e->seqno)
+		return;
 	/* handle every breakpoint only once */
 	if (data->steps_done >= data->instruction_count + 2)
 		goto resume;
@@ -2225,7 +2228,8 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	++data->steps_done;
 
 resume:
-	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, NULL);
+	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, &seqno);
+	data->last_eu_control_seqno = seqno;
 	if (data->steps_done < data->instruction_count + 2)
 		igt_assert_eq(ret, 0);
 
