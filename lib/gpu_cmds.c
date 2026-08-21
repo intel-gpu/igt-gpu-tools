@@ -938,7 +938,7 @@ xehp_fill_interface_descriptor(struct intel_bb *ibb,
 	idd->desc4.binding_table_entry_count = 0;
 	idd->desc4.binding_table_pointer = (binding_table_offset >> 5);
 
-	idd->desc5.num_threads_in_tg = 1;
+	idd->desc5.num_threads_in_tg = shdr->num_threads_in_tg;
 }
 
 /* bspec: 77779 */
@@ -984,11 +984,7 @@ xe3p_fill_interface_descriptor(struct intel_bb *ibb,
 	if (shdr->grfs_per_thread)
 		idd2_set_grfs_per_thread(idd, shdr);
 
-	/*
-	* For testing purposes, use only one thread per thread group.
-	* This makes it possible to identify threads by thread group id.
-	*/
-	idd->dw05.number_of_threads_in_gpgpu_thread_group = 1;
+	idd->dw05.number_of_threads_in_gpgpu_thread_group = shdr->num_threads_in_tg;
 
 	if (shdr->slm_size)
 		idd2_set_slm_size(idd, shdr);
