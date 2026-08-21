@@ -192,7 +192,6 @@ __xehp_gpgpu_execfunc(struct intel_bb *ibb,
 
 	xehp_fill_interface_descriptor(ibb, target, shdr, &idd);
 	idd.desc2.illegal_opcode_exception_enable = should_enable_illegal_opcode_exception(shdr);
-	idd.desc5.num_threads_in_tg = shdr->num_threads_in_tg;
 
 	if (sip && sip->size)
 		sip_offset = fill_sip(ibb, sip->instr, 4 * sip->size);
