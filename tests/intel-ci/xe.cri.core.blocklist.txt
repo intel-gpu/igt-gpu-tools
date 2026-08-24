@@ -39,6 +39,8 @@ igt@xe_media_fill@media-fill
 ##################################################################
 igt@xe_ccs@.*
 igt@xe_evict_ccs@.*
+igt@xe_exec_reset@long-spin-comp-reuse-many-preempt-threads
+igt@xe_exec_system_allocator@pat-index-madvise-pat-idx-uc-comp-(single|multi)-vma
 ##################################################################
 # Valid skip: Threadgroup-preemption not supported on CRI
 ##################################################################
@@ -50,4 +52,23 @@ igt@xe_compute_preempt@compute-threadgroup-preempt
 igt@xe_compute@ccs-mode-basic
 igt@xe_compute@ccs-mode-compute-kernel
 igt@xe_compute@eu-busy-10s
+##################################################################
+# Valid Skip: Not applicable for single tile platform
+##################################################################
+igt@.*@.*tiles
+##################################################################
+# Valid skip: Test applicable only for pre xe3p
+##################################################################
+igt@xe_eudebug_online@pagefault-one-of-many
+igt@xe_eudebug_online@pagefault-read-stress
+igt@xe_eudebug_online@pagefault-write-stress
+##################################################################
+# Valid Skip: Page Reclamation feature is not supported on CRI
+##################################################################
+igt@xe_page_reclaim@.*
+##################################################################
+# Valid Skip: Test is applicable only for NVL
+##################################################################
+igt@xe_pat@l2-flush-opt-svm-pat-restrict
+igt@xe_pat@xa-app-transient-media-(off|on)
 ##################################################################
