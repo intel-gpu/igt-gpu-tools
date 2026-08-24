@@ -51,3 +51,17 @@ igt@xe_compute@ccs-mode-basic
 igt@xe_compute@ccs-mode-compute-kernel
 igt@xe_compute@eu-busy-10s
 ##################################################################
+# Valid Skip: Page Reclamation feature is not supported
+##################################################################
+igt@xe_page_reclaim@.*
+##################################################################
+# Valid Skip: Not applicable for single tile platform
+##################################################################
+igt@.*@.*tiles
+##################################################################
+# Valid skip: Test applicable only for pre xe3p
+##################################################################
+igt@xe_eudebug_online@pagefault-one-of-many
+igt@xe_eudebug_online@pagefault-read-stress
+igt@xe_eudebug_online@pagefault-write-stress
+##################################################################
