@@ -3237,11 +3237,13 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
 	uint64_t flags = SHADER_BREAKPOINT | TRIGGER_RESUME_DELAYED;
 	struct xe_eudebug_session *s;
 	struct online_debug_data *data;
+	struct online_debug_data *other_data;
 	struct xe_eudebug_client *other;
 
 	data = online_debug_data_create(fd, hwe, flags);
+	other_data = online_debug_data_create(fd, hwe, SHADER_NOP);
 	s = xe_eudebug_session_create(fd, run_online_client, flags, data);
-	other = xe_eudebug_client_create(fd, run_online_client, SHADER_NOP, data);
+	other = xe_eudebug_client_create(fd, run_online_client, SHADER_NOP, other_data);
 
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EU_ATTENTION,
 					eu_attention_debug_trigger);
@@ -3274,6 +3276,7 @@ static void test_preemption(int fd, struct drm_xe_engine_class_instance *hwe)
 		     "Workload with breakpoint has ended without resume!\n");
 
 	online_debug_data_destroy(data);
+	online_debug_data_destroy(other_data);
 }
 
 /**
