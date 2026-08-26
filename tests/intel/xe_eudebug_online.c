@@ -127,7 +127,7 @@ struct online_debug_data {
 	uint8_t *single_step_bitmask;
 	int stepped_threads_count;
 	struct timespec exception_arrived;
-	int last_eu_control_seqno;
+	uint64_t last_eu_control_seqno;
 	struct drm_xe_eudebug_event *exception_event;
 	uint32_t pf_thread_number;
 	int num_threads_per_eu;
