@@ -125,7 +125,7 @@ static struct gpgpu_shader *get_sip(int fd, enum sip_type sip_type, enum shader_
 		break;
 	}
 
-	gpgpu_shader__end_system_routine(sip, shader_type == SHADER_BREAKPOINT);
+	gpgpu_shader__end_system_routine(sip);
 
 	return sip;
 }
