@@ -307,7 +307,7 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 	if (data->flags & SIP_SINGLE_STEP)
 		gpgpu_shader__end_system_routine_step_if_eq(sip, w_dim.y, 0);
 	else
-		gpgpu_shader__end_system_routine(sip, true);
+		gpgpu_shader__end_system_routine(sip);
 
 	return sip;
 }
