@@ -877,28 +877,21 @@ void gpgpu_shader__write_on_exception(struct gpgpu_shader *shdr, uint32_t value,
 /**
  * gpgpu_shader__end_system_routine:
  * @shdr: shader to be modified
- * @breakpoint_suppress: breakpoint suppress flag
  *
  * Return from system routine. To prevent infinite jumping to the system
- * routine on a breakpoint, @breakpoint_suppress flag has to be set.
+ * routine on a breakpoint suppress breakpoint.
  */
-void gpgpu_shader__end_system_routine(struct gpgpu_shader *shdr,
-				      bool breakpoint_suppress)
+void gpgpu_shader__end_system_routine(struct gpgpu_shader *shdr)
 {
-	/*
-	 * set breakpoint suppress bit to avoid an endless loop
-	 * when sip was invoked by a breakpoint
-	 */
-	if (breakpoint_suppress)
-		emit_iga64_code(shdr, breakpoint_suppress, R"(
-(W)	or(1)		cr0.0:ud	cr0.0:ud	0x8000:ud
-		)");
-
 	emit_iga64_code(shdr, end_system_routine, R"(
-(W)	and(1)		cr0.1:ud	cr0.1:ud	ARG(0):ud
+(W)	mov(1)		f0.0:ud		0x0:ud
+(W)	and(1)(ne)f0.0	null:ud		cr0.1:ud	0x80000000:ud
+(W&f0.0)or(1)		cr0.0:ud	cr0.0:ud	0x8000:ud
+// clear all exceptions, except read only bit
+(W)	and(1)		cr0.1:ud	cr0.1:ud	0x047fffff:ud
 // return to an application
 (W)	and(1)		cr0.0:ud	cr0.0:ud	0x7FFFFFFD:ud
-	)", 0x7fffff | (1 << 26)); /* clear all exceptions, except read only bit */
+	)"); /* clear all exceptions, except read only bit */
 }
 
 /**
