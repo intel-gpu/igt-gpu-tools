@@ -717,6 +717,14 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 	if (data->last_eu_control_seqno > att->base.seqno)
 		return;
 
+	pthread_mutex_lock(&data->mutex);
+	if (igt_nsec_elapsed(&data->exception_arrived) < (MAX_PREEMPT_TIMEOUT + 1) * NSEC_PER_SEC &&
+	    data->flags & TRIGGER_RESUME_DELAYED) {
+		pthread_mutex_unlock(&data->mutex);
+		return;
+	}
+	pthread_mutex_unlock(&data->mutex);
+
 	bitmask = calloc(1, att->bitmask_size);
 	igt_assert(bitmask);
 
@@ -729,12 +737,7 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 		igt_assert(memcmp(bitmask, att->bitmask, att->bitmask_size) == 0);
 
 	pthread_mutex_lock(&data->mutex);
-	if (igt_nsec_elapsed(&data->exception_arrived) < (MAX_PREEMPT_TIMEOUT + 1) * NSEC_PER_SEC &&
-	    d->flags & TRIGGER_RESUME_DELAYED) {
-		pthread_mutex_unlock(&data->mutex);
-		free(bitmask);
-		return;
-	} else if (d->flags & TRIGGER_RESUME_ONE) {
+	if (d->flags & TRIGGER_RESUME_ONE) {
 		only_first_set_bit(bitmask, bitmask, bitmask_size);
 	} else if (d->flags & TRIGGER_RESUME_DSS) {
 		uint64_t *event = (uint64_t *)att->bitmask;
