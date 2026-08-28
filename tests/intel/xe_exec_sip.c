@@ -133,7 +133,7 @@ static struct gpgpu_shader *get_sip(int fd, enum sip_type sip_type, unsigned int
 		break;
 	}
 
-	gpgpu_shader__end_system_routine(sip, false);
+	gpgpu_shader__end_system_routine(sip);
 
 	return sip;
 }
