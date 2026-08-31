@@ -66,6 +66,7 @@ static void test_sysfs_toggle(int fd)
 #define VM_BIND_DELAY_UFENCE_ACK	BIT(8)
 #define VM_BIND_UFENCE_RECONNECT	BIT(9)
 #define VM_BIND_UFENCE_SIGINT_CLIENT	BIT(10)
+#define VM_BIND_UFENCE_NO_ACK		BIT(11)
 #define TEST_FAULTABLE			BIT(30)
 #define TEST_DISCOVERY			BIT(31)
 
@@ -1938,6 +1939,9 @@ static void test_metadata_attach(int fd, uint64_t flags, int num_clients)
 }
 
 #define STAGE_CLIENT_WAIT_ON_UFENCE_DONE 1337
+#define STAGE_NO_ACK_READY_FOR_PARTIAL_ACK 1338
+#define STAGE_NO_ACK_PARTIAL_ACK_DONE 1339
+#define STAGE_NO_ACK_FINAL_ACK_DONE 1340
 
 #define UFENCE_EVENT_COUNT_EXPECTED 4
 #define UFENCE_EVENT_COUNT_MAX 100
@@ -1984,6 +1988,70 @@ static void client_wait_ufences(struct xe_eudebug_client *c,
 		igt_assert_eq(err, 0);
 		igt_assert_eq(b->fence_data->vm_sync, b->f.timeline_value);
 		igt_debug("wait #%d completed\n", i);
+	}
+}
+
+#define NO_ACK_HELD_COUNT 2
+
+static void client_wait_ufences_no_ack(struct xe_eudebug_client *c,
+				       int fd, uint32_t vm,
+				       struct ufence_bind *binds, int count)
+{
+	const int64_t short_timeout_ns =
+		SLOW_QUICK(500 * NSEC_PER_MSEC, NSEC_PER_USEC);
+	const int64_t long_timeout_ns =
+		XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * NSEC_PER_SEC;
+	int64_t timeout_ns;
+	int err;
+
+	igt_assert(count >= NO_ACK_HELD_COUNT);
+
+	xe_eudebug_client_signal_stage(c, STAGE_NO_ACK_READY_FOR_PARTIAL_ACK);
+	xe_eudebug_client_wait_stage(c, STAGE_NO_ACK_PARTIAL_ACK_DONE);
+
+	for (int i = 0; i < count - NO_ACK_HELD_COUNT; i++) {
+		struct ufence_bind *b = &binds[i];
+
+		timeout_ns = long_timeout_ns;
+		err = __xe_wait_ufence(fd, &b->fence_data->vm_sync, b->f.timeline_value,
+				       0, &timeout_ns);
+		igt_assert_eq(err, 0);
+		igt_assert_eq(b->fence_data->vm_sync, b->f.timeline_value);
+		igt_debug("no-ack: wait #%d completed (was ACKed)\n", i);
+	}
+
+	for (int i = count - NO_ACK_HELD_COUNT; i < count; i++) {
+		struct ufence_bind *b = &binds[i];
+
+		timeout_ns = short_timeout_ns;
+		err = __xe_wait_ufence(fd, &b->fence_data->vm_sync, b->f.timeline_value,
+				       0, &timeout_ns);
+		igt_assert_eq(err, -ETIME);
+		igt_assert_neq(b->fence_data->vm_sync, b->f.timeline_value);
+		igt_debug("no-ack: wait #%d blocked as expected (not ACKed)\n", i);
+	}
+
+	for (int i = count - NO_ACK_HELD_COUNT; i < count; i++) {
+		struct ufence_bind *b = &binds[i];
+
+		err = __xe_vm_bind(fd, vm, 0, 0, 0, b->addr, b->range,
+				   DRM_XE_VM_BIND_OP_UNMAP, 0, NULL, 0, 0, 0, 0);
+		igt_assert_eq(err, -EBUSY);
+		igt_debug("no-ack: unbind #%d denied with -EBUSY as expected\n", i);
+	}
+
+	xe_eudebug_client_signal_stage(c, STAGE_CLIENT_WAIT_ON_UFENCE_DONE);
+	xe_eudebug_client_wait_stage(c, STAGE_NO_ACK_FINAL_ACK_DONE);
+
+	for (int i = count - NO_ACK_HELD_COUNT; i < count; i++) {
+		struct ufence_bind *b = &binds[i];
+
+		timeout_ns = long_timeout_ns;
+		err = __xe_wait_ufence(fd, &b->fence_data->vm_sync, b->f.timeline_value,
+				       0, &timeout_ns);
+		igt_assert_eq(err, 0);
+		igt_assert_eq(b->fence_data->vm_sync, b->f.timeline_value);
+		igt_debug("no-ack: wait #%d completed after delayed ACK\n", i);
 	}
 }
 
@@ -2038,7 +2106,10 @@ static void basic_ufence_client(struct xe_eudebug_client *c)
 						&b->f, 1, 0);
 	}
 
-	client_wait_ufences(c, fd, binds, n);
+	if (c->flags & VM_BIND_UFENCE_NO_ACK)
+		client_wait_ufences_no_ack(c, fd, vm, binds, n);
+	else
+		client_wait_ufences(c, fd, binds, n);
 
 	for (int i = 0; i < n; i++) {
 		struct ufence_bind *b = &binds[i];
@@ -2161,6 +2232,13 @@ static int wait_for_ufence_events(struct ufence_priv *priv, int timeout_ms)
  * Functionality: SIGINT
  * Description:
  *	Give user fence in application, hold it, send SIGINT to client and check if anything breaks.
+ *
+ * SUBTEST: basic-vm-bind-ufence-no-ack
+ * Functionality: VM bind event
+ * Description:
+ *	Verify that missing debugger ACK for VM_BIND ufence blocks the application.
+ *	ACKs only the first (N-2) ufences immediately, verifies last 2 are blocked,
+ *	then delivers remaining ACKs and confirms client unblocks.
  */
 static void test_basic_ufence(int fd, uint64_t flags)
 {
@@ -2183,26 +2261,50 @@ static void test_basic_ufence(int fd, uint64_t flags)
 	xe_eudebug_debugger_start_worker(d);
 	xe_eudebug_client_start(c);
 
-	xe_eudebug_debugger_wait_stage(s, STAGE_CLIENT_WAIT_ON_UFENCE_DONE);
-	xe_eudebug_assert_f(d, wait_for_ufence_events(priv, XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * MSEC_PER_SEC) == 0,
-			    "missing ufence events\n");
+	if (flags & VM_BIND_UFENCE_NO_ACK) {
+		xe_eudebug_debugger_wait_stage(s, STAGE_NO_ACK_READY_FOR_PARTIAL_ACK);
+		xe_eudebug_assert_f(d,
+				    wait_for_ufence_events(priv,
+							  XE_EUDEBUG_DEFAULT_TIMEOUT_SEC *
+							  MSEC_PER_SEC) == 0,
+				    "missing ufence events\n");
 
-	if (flags & VM_BIND_DELAY_UFENCE_ACK)
-		sleep(XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * 4 / 5);
+		for (int i = 0;
+		     i < UFENCE_EVENT_COUNT_EXPECTED - NO_ACK_HELD_COUNT; i++)
+			xe_eudebug_ack_ufence(d->fd, &priv->ufence_events[i]);
+		xe_eudebug_debugger_signal_stage(d, STAGE_NO_ACK_PARTIAL_ACK_DONE);
 
-	if (flags & VM_BIND_UFENCE_SIGINT_CLIENT) {
-		filter = XE_EUDEBUG_FILTER_ALL;
-		kill(c->pid, SIGINT);
-		c->pid = 0;
-		c->done = 1;
-	} else if (flags & VM_BIND_UFENCE_RECONNECT) {
-		filter = XE_EUDEBUG_FILTER_EVENT_VM_BIND | XE_EUDEBUG_FILTER_EVENT_VM |
-				XE_EUDEBUG_FILTER_EVENT_OPEN;
-		xe_eudebug_debugger_detach(d);
-		xe_eudebug_client_wait_done(c);
-		igt_assert_eq(xe_eudebug_debugger_attach(d, c), 0);
+		xe_eudebug_debugger_wait_stage(s, STAGE_CLIENT_WAIT_ON_UFENCE_DONE);
+
+		for (int i = UFENCE_EVENT_COUNT_EXPECTED - NO_ACK_HELD_COUNT;
+		     i < UFENCE_EVENT_COUNT_EXPECTED; i++)
+			xe_eudebug_ack_ufence(d->fd, &priv->ufence_events[i]);
+		xe_eudebug_debugger_signal_stage(d, STAGE_NO_ACK_FINAL_ACK_DONE);
 	} else {
-		ack_fences(d);
+		xe_eudebug_debugger_wait_stage(s, STAGE_CLIENT_WAIT_ON_UFENCE_DONE);
+		xe_eudebug_assert_f(d,
+				    wait_for_ufence_events(priv,
+							  XE_EUDEBUG_DEFAULT_TIMEOUT_SEC *
+							  MSEC_PER_SEC) == 0,
+				    "missing ufence events\n");
+
+		if (flags & VM_BIND_DELAY_UFENCE_ACK)
+			sleep(XE_EUDEBUG_DEFAULT_TIMEOUT_SEC * 4 / 5);
+
+		if (flags & VM_BIND_UFENCE_SIGINT_CLIENT) {
+			filter = XE_EUDEBUG_FILTER_ALL;
+			kill(c->pid, SIGINT);
+			c->pid = 0;
+			c->done = 1;
+		} else if (flags & VM_BIND_UFENCE_RECONNECT) {
+			filter = XE_EUDEBUG_FILTER_EVENT_VM_BIND | XE_EUDEBUG_FILTER_EVENT_VM |
+					XE_EUDEBUG_FILTER_EVENT_OPEN;
+			xe_eudebug_debugger_detach(d);
+			xe_eudebug_client_wait_done(c);
+			igt_assert_eq(xe_eudebug_debugger_attach(d, c), 0);
+		} else {
+			ack_fences(d);
+		}
 	}
 
 	xe_eudebug_client_wait_done(c);
@@ -3004,6 +3106,9 @@ int igt_main()
 
 	igt_subtest("basic-vm-bind-ufence-sigint-client")
 		test_basic_ufence(fd, VM_BIND_UFENCE_SIGINT_CLIENT);
+
+	igt_subtest("basic-vm-bind-ufence-no-ack")
+		test_basic_ufence(fd, VM_BIND_UFENCE_NO_ACK);
 
 	igt_subtest("basic-vm-bind-discovery")
 		test_basic_discovery(fd, VM_BIND, true);
