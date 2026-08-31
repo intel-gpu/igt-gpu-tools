@@ -259,6 +259,11 @@ if chamelium.found() or libtsi.found()
 	lib_sources += 'monitor_edids/monitor_edids_helper.c'
 endif
 
+if build_xe_eudebug
+	build_info += 'Xe EU debugger test framework enabled.'
+	lib_sources += 'xe/xe_eudebug.c'
+endif
+
 if get_option('srcdir') != ''
     srcdir = join_paths(get_option('srcdir'), 'tests')
 else
@@ -275,7 +280,7 @@ lib_version = vcs_tag(input : 'version.h.in', output : 'version.h',
 		      fallback : 'NO-GIT',
 		      command : vcs_command )
 
-iga64_assembly_sources = [ 'gpgpu_shader.c', 'gpgpu_fill.c', '../tests/intel/xe_prefetch_fault.c']
+iga64_assembly_sources = [ 'gpgpu_shader.c', 'gpgpu_fill.c', '../tests/intel/xe_eudebug_online.c', '../tests/intel/xe_prefetch_fault.c']
 libiga64_asms = static_library('iga64_asms',
 	iga64_assembly_sources,
 	include_directories: inc,
