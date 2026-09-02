@@ -17,7 +17,7 @@ igt@xe_pxp@.*
 ##################################################################
 # Valid skip: multigpu runs in separate config
 ##################################################################
-igt@.*@.*multigpu.*
+igt@.*multigpu.*
 igt@xe_peer2peer@.*
 #################################################################
 # Valid skip: No render engine support on CRI
@@ -72,3 +72,7 @@ igt@xe_page_reclaim@.*
 igt@xe_pat@l2-flush-opt-svm-pat-restrict
 igt@xe_pat@xa-app-transient-media-(off|on)
 ##################################################################
+# Module load already happens in the setup phase
+####################################################################
+igt@xe_module_load@load
+####################################################################
