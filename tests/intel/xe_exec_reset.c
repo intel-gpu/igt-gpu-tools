@@ -15,6 +15,8 @@
 #include <fcntl.h>
 
 #include "igt.h"
+#include "igt_device.h"
+#include "igt_kmod.h"
 #include "igt_sysfs.h"
 #include "lib/igt_syncobj.h"
 #include "lib/intel_reg.h"
@@ -140,6 +142,7 @@ static void test_spin(int fd, struct drm_xe_engine_class_instance *eci,
 #define DESTROY_VM_CTX_STRESS		(0x1 << 20)
 #define MIXED_ENGINE_STRESS		(0x1 << 21)
 #define PM_TRANSITION_STRESS		(0x1 << 22)
+#define FAULT_INJECT_STRESS		(0x1 << 23)
 
 /**
  * SUBTEST: %s-cat-error
@@ -760,7 +763,7 @@ static void submit_jobs(struct gt_thread_data *t)
 	uint32_t pressure_bos[PRESSURE_COUNT];
 	uint32_t *data;
 	int pressure_count;
-	int i = 0;
+	int i = 0, exec_ret;
 
 	bo = xe_bo_create(fd, vm, bo_size, vram_if_possible(fd, t->gt),
 			  DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM);
@@ -794,8 +797,26 @@ static void submit_jobs(struct gt_thread_data *t)
 			continue;
 		}
 
-		xe_exec(fd, &exec);
-		xe_exec_queue_destroy(fd, exec.exec_queue_id);
+		/*
+		 * Once an injected GT reset failure wedges the device, exec and
+		 * queue teardown return -ECANCELED. That is the expected outcome
+		 * for the fault-injection stress
+		 */
+		if (t->flags & FAULT_INJECT_STRESS) {
+			struct drm_xe_exec_queue_destroy destroy = {
+				.exec_queue_id = exec.exec_queue_id,
+			};
+
+			exec_ret = __xe_exec(fd, &exec);
+			igt_assert_f(exec_ret == 0 || exec_ret == -ECANCELED,
+				     "exec returned unexpected error %d (expected 0 or -ECANCELED)\n",
+				     exec_ret);
+			igt_ioctl(fd, DRM_IOCTL_XE_EXEC_QUEUE_DESTROY, &destroy);
+		} else {
+			xe_exec(fd, &exec);
+			xe_exec_queue_destroy(fd, exec.exec_queue_id);
+		}
+
 		(*t->num_submit)++;
 
 		if ((t->flags & MEM_PRESSURE_STRESS) && !(i % 128)) {
@@ -829,8 +850,20 @@ static void submit_jobs(struct gt_thread_data *t)
 		pressure_bo_destroy(fd, pressure_bos, PRESSURE_COUNT);
 
 	munmap(data, bo_size);
-	gem_close(fd, bo);
-	xe_vm_destroy(fd, vm);
+	/*
+	 * On a device wedged by injected GT reset failures, BO close and VM
+	 * destroy also return -ECANCELED.
+	 */
+	if (t->flags & FAULT_INJECT_STRESS) {
+		struct drm_gem_close close_bo = { .handle = bo };
+		struct drm_xe_vm_destroy vm_destroy = { .vm_id = vm };
+
+		igt_ioctl(fd, DRM_IOCTL_GEM_CLOSE, &close_bo);
+		igt_ioctl(fd, DRM_IOCTL_XE_VM_DESTROY, &vm_destroy);
+	} else {
+		gem_close(fd, bo);
+		xe_vm_destroy(fd, vm);
+	}
 }
 
 static void *gt_reset_thread(void *data)
@@ -848,6 +881,54 @@ static void *gt_reset_thread(void *data)
 		submit_jobs(t);
 
 	return NULL;
+}
+
+static int fault_inject_fd = -1;
+
+static void gt_reset_disable_fault_injection(int sig)
+{
+	if (fault_inject_fd < 0)
+		return;
+
+	igt_debugfs_write(fault_inject_fd, "fail_gt_reset/probability", "0");
+	igt_debugfs_write(fault_inject_fd, "fail_gt_reset/times", "1");
+	fault_inject_fd = -1;
+}
+
+static void gt_reset_enable_fault_injection(int fd)
+{
+	static bool exit_handler_installed;
+
+	fault_inject_fd = fd;
+
+	if (!exit_handler_installed) {
+		igt_install_exit_handler(gt_reset_disable_fault_injection);
+		exit_handler_installed = true;
+	}
+
+	igt_debugfs_write(fd, "fail_gt_reset/probability", "100");
+	igt_debugfs_write(fd, "fail_gt_reset/times", "2");
+}
+
+static int try_vm_create(int fd)
+{
+	struct drm_xe_vm_create create = { 0 };
+	int err = 0;
+
+	if (igt_ioctl(fd, DRM_IOCTL_XE_VM_CREATE, &create))
+		err = -errno;
+	else
+		xe_vm_destroy(fd, create.vm_id);
+
+	return err;
+}
+
+static void ignore_gt_reset_fault_dmesg(void)
+{
+	igt_emit_ignore_dmesg_regex("reset failed \\(-ECANCELED\\)"
+				    "|declared device .* as wedged"
+				    "|GPU HANG"
+				    "|Failed to reset");
 }
 
 /**
@@ -891,6 +972,9 @@ static void *gt_reset_thread(void *data)
  * Description: Test GT reset while long spinner workload is active
  * Test category: stress test
  *
+ * SUBTEST: gt-reset-fault-injection
+ * Description: Stress concurrent GT resets and job submissions with GT reset failures injected via debugfs
+ * Test category: fault injection
  */
 static void
 gt_reset(int fd, int gt, int n_threads, int n_sec, unsigned int flags)
@@ -906,6 +990,9 @@ gt_reset(int fd, int gt, int n_threads, int n_sec, unsigned int flags)
 
 	pthread_mutex_init(&mutex, 0);
 	pthread_cond_init(&cond, 0);
+
+	if (flags & FAULT_INJECT_STRESS)
+		gt_reset_enable_fault_injection(fd);
 
 	for (i = 0; i < n_threads; ++i) {
 		threads[i].mutex = &mutex;
@@ -939,6 +1026,9 @@ gt_reset(int fd, int gt, int n_threads, int n_sec, unsigned int flags)
 
 	igt_info("number of resets %d, submissions %d, submit fails %d vm_recreate %d\n",
 		 num_reset, num_submit, num_submit_fail, num_vm_recreate);
+
+	if (flags & FAULT_INJECT_STRESS)
+		gt_reset_disable_fault_injection(0);
 
 	igt_assert_neq(num_reset, 0);
 	igt_assert_neq(num_submit, 0);
@@ -1122,6 +1212,7 @@ int igt_main()
 	int gt;
 	int class;
 	int fd;
+	char pci_slot[NAME_MAX];
 
 	igt_fixture()
 		fd = drm_open_driver(DRIVER_XE);
@@ -1325,6 +1416,30 @@ int igt_main()
 					    LEGACY_MODE_ADDR, false);
 			break;
 		}
+
+	igt_subtest("gt-reset-fault-injection") {
+		igt_require_f(igt_debugfs_exists(fd, "fail_gt_reset/probability",
+						 O_RDWR),
+			      "GT reset fault injection not available; "
+			      "CONFIG_DRM_XE_KUNIT_TEST/fault-injection must be "
+			      "enabled in the KMD\n");
+
+		igt_device_get_pci_slot_name(fd, pci_slot);
+		ignore_gt_reset_fault_dmesg();
+
+		gt_reset(fd, 0, 8, 2, FAULT_INJECT_STRESS);
+
+		igt_assert_f(try_vm_create(fd) != 0,
+			     "Device did not wedge after injected GT reset failure\n");
+
+		gt_reset_disable_fault_injection(0);
+		drm_close_driver(fd);
+		igt_kmod_rebind("xe", pci_slot);
+		fd = drm_open_driver(DRIVER_XE);
+
+		igt_assert_f(try_vm_create(fd) == 0,
+			     "Device not functional after rebind recovery\n");
+	}
 
 	igt_subtest("gt-mocs-reset")
 		xe_for_each_gt(fd, gt)
