@@ -147,6 +147,7 @@ struct online_debug_data {
 		STEERING_CONTROL_LOOP,
 		STEERING_CONTROL_END_LOOP,
 	} steering_control;
+	int debugger_detach_count;
 };
 
 struct sip_arf_dump {
@@ -4091,14 +4092,10 @@ static void eu_debugger_ndetach_trigger(struct xe_eudebug_debugger *d,
 					struct drm_xe_eudebug_event *event)
 {
 	struct online_debug_data *data = d->ptr;
-	static int debugger_detach_count;
 
-	if (debugger_detach_count < (SHADER_LOOP_N - 1)) {
-		/* Make sure the resume command was issued before detaching the debugger */
-		if (data->last_eu_control_seqno > event->seqno)
-			return;
+	if (data->debugger_detach_count < (SHADER_LOOP_N - 1)) {
 		eu_debugger_detach_trigger(d, event);
-		debugger_detach_count++;
+		data->debugger_detach_count++;
 	} else {
 		igt_debug("Reached Nth breakpoint hence preventing the debugger detach\n");
 	}
@@ -4138,6 +4135,8 @@ static void test_debugger_reopen(int fd, struct drm_xe_engine_class_instance *hw
 
 
 	xe_eudebug_session_run(s);
+
+	igt_assert_f(data->debugger_detach_count > 0, "Expected debugger to detach at least once\n");
 
 	xe_eudebug_session_destroy(s);
 	online_debug_data_destroy(data);
