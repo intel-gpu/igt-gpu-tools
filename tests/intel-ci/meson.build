@@ -17,6 +17,7 @@ intelci_files = [
   'xe.bmg.dkms.kv6.6.blocklist.txt',
   'xe.bmg.eudebug.blocklist.txt',
   'xe.cri.core.blocklist.txt',
+  'xe.cri.premerge.testlist',
   'xe.dkms_kv5.15.blocklist.txt',
   'xe.eudebug.blocklist.txt',
   'xe.fast-feedback.testlist',
