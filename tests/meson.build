@@ -318,6 +318,7 @@ intel_xe_progs = [
 	'xe_live_ktest',
 	'xe_madvise',
 	'xe_media_fill',
+        'xe_mempage_offline',
 	'xe_mmap',
         'xe_module_load',
         'xe_multigpu_svm',
