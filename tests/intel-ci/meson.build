@@ -37,6 +37,7 @@ intelci_files = [
   'xe-sriov-vf.blocklist.txt',
   'xe.sriov-vm.blocklist.txt',
   'xe-sriov-vm.blocklist.txt',
+  'xe.cri.sriov-vm.blocklist.txt',
   'xe.wcl.core.blocklist.txt',
 ]
 
