@@ -1313,8 +1313,6 @@ bool xe_eudebug_debugger_available(int fd)
 /**
  * xe_eudebug_debugger_create:
  * @master_fd: xe client used to open the debugger connection
- * @flags: flags stored in a debugger structure, can be used at will
- * of the caller, i.e. to be used inside triggers.
  * @data: test's private data, allocated with MAP_SHARED | MAP_ANONYMOUS,
  * can be shared between client and debugger. Can be NULL.
  *
@@ -1323,19 +1321,18 @@ bool xe_eudebug_debugger_available(int fd)
  * you need call @xe_eudebug_debugger_attach.
  */
 struct xe_eudebug_debugger *
-xe_eudebug_debugger_create(int master_fd, uint64_t flags, void *data)
+xe_eudebug_debugger_create(int master_fd, void *data)
 {
 	struct xe_eudebug_debugger *d;
 
 	d = calloc(1, sizeof(*d));
 	igt_assert(d);
 
-	d->flags = flags;
 	IGT_INIT_LIST_HEAD(&d->triggers);
 	d->log = xe_eudebug_event_log_create("debugger", MAX_EVENT_LOG_SIZE);
 	d->fd = -1;
 	d->master_fd = master_fd;
-	d->ptr = data;
+	d->data = data;
 	d->received_sigint = false;
 	d->handled_sigint = false;
 	d->received_signal = false;
@@ -1606,10 +1603,8 @@ void xe_eudebug_debugger_kill(struct xe_eudebug_debugger *d, int sig)
  * xe_eudebug_client_create_timeout:
  * @master_fd: xe client used to open the debugger connection
  * @work: function that opens xe device and executes arbitrary workload
- * @flags: flags stored in a client structure, can be used at will
- * of the caller, i.e. to provide the @work function an additional switch.
  * @data: test's private data, allocated with MAP_SHARED | MAP_ANONYMOUS,
- * can be shared between client and debugger. Accessible via client->ptr.
+ * can be shared between client and debugger. Accessible via client->data.
  * Can be NULL.
  * @timeout: time period during which the client is expected to finish
  * its workload
@@ -1622,20 +1617,19 @@ void xe_eudebug_debugger_kill(struct xe_eudebug_debugger *d, int sig)
  * event log initialized.
  */
 struct xe_eudebug_client *xe_eudebug_client_create_timeout(int master_fd, xe_eudebug_client_work_fn work,
-							   uint64_t flags, void *data, int timeout_s)
+							   void *data, int timeout_s)
 {
 	struct xe_eudebug_client *c;
 
 	c = calloc(1, sizeof(*c));
 	igt_assert(c);
 
-	c->flags = flags;
 	igt_assert(!pipe(c->p_in));
 	igt_assert(!pipe(c->p_out));
 	c->seqno = 1;
 	c->log = xe_eudebug_event_log_create("client", MAX_EVENT_LOG_SIZE);
 	c->done = 0;
-	c->ptr = data;
+	c->data = data;
 	c->master_fd = master_fd;
 	c->timeout_ms = timeout_s * MSEC_PER_SEC;
 	c->allow_dead_client = false;
@@ -1686,10 +1680,8 @@ struct xe_eudebug_client *xe_eudebug_client_create_timeout(int master_fd, xe_eud
  * xe_eudebug_client_create:
  * @master_fd: xe client used to open the debugger connection
  * @work: function that opens xe device and executes arbitrary workload
- * @flags: flags stored in a client structure, can be used at will
- * of the caller, i.e. to provide the @work function an additional switch.
  * @data: test's private data, allocated with MAP_SHARED | MAP_ANONYMOUS,
- * can be shared between client and debugger. Accessible via client->ptr.
+ * can be shared between client and debugger. Accessible via client->data.
  * Can be NULL.
  *
  * Calls xe_eudebug_client_create_timeout() with default timeout
@@ -1698,9 +1690,9 @@ struct xe_eudebug_client *xe_eudebug_client_create_timeout(int master_fd, xe_eud
  * event log initialized.
  */
 struct xe_eudebug_client *xe_eudebug_client_create(int master_fd, xe_eudebug_client_work_fn work,
-                                                   uint64_t flags, void *data)
+						   void *data)
 {
-	return xe_eudebug_client_create_timeout(master_fd, work, flags, data, XE_EUDEBUG_DEFAULT_TIMEOUT_SEC);
+	return xe_eudebug_client_create_timeout(master_fd, work, data, XE_EUDEBUG_DEFAULT_TIMEOUT_SEC);
 }
 
 /**
@@ -1835,7 +1827,6 @@ void xe_eudebug_client_wait_stage(struct xe_eudebug_client *c, uint64_t stage)
  * xe_eudebug_session_create:
  * @fd: Xe file descriptor
  * @work: function passed to the xe_eudebug_client_create
- * @flags: flags passed to client and debugger
  * @test_private: test's  data, allocated with MAP_SHARED | MAP_ANONYMOUS,
  * passed to client and debugger. Can be NULL.
  *
@@ -1843,7 +1834,6 @@ void xe_eudebug_client_wait_stage(struct xe_eudebug_client *c, uint64_t stage)
  */
 struct xe_eudebug_session *xe_eudebug_session_create(int fd,
 						     xe_eudebug_client_work_fn work,
-						     unsigned int flags,
 						     void *test_private)
 {
 	struct xe_eudebug_session *s;
@@ -1851,8 +1841,8 @@ struct xe_eudebug_session *xe_eudebug_session_create(int fd,
 	s = calloc(1, sizeof(*s));
 	igt_assert(s);
 
-	s->client = xe_eudebug_client_create(fd, work, flags, test_private);
-	s->debugger = xe_eudebug_debugger_create(fd, flags, test_private);
+	s->client = xe_eudebug_client_create(fd, work, test_private);
+	s->debugger = xe_eudebug_debugger_create(fd, test_private);
 
 	return s;
 }
