@@ -27,6 +27,52 @@
 #include "xe/xe_ioctl.h"
 #include "xe/xe_query.h"
 
+#define PAGE_SIZE SZ_4K
+#define MDATA_SIZE (WORK_IN_PROGRESS_DRM_XE_DEBUG_METADATA_NUM * PAGE_SIZE)
+
+struct vm_bind_clear_thread_priv {
+	struct drm_xe_engine_class_instance *hwe;
+	struct xe_eudebug_client *c;
+	pthread_t thread;
+	uint64_t region;
+	unsigned long sum;
+};
+
+struct vm_bind_clear_priv {
+	unsigned long unbind_count;
+	unsigned long bind_count;
+	unsigned long sum;
+	bool faultable;
+};
+
+#define VM_BIND_CLEAR_CLEAN_COOKIE 0x434c45414eULL
+
+struct xe_eudebug_private_data {
+	uint64_t flags;
+	struct drm_xe_engine_class_instance *hwe;
+	struct vm_bind_clear_priv *vm_bind_priv;
+	struct ufence_priv *uf_priv;
+};
+
+static struct xe_eudebug_private_data *
+xe_eudebug_private_data_create(uint64_t flags)
+{
+	struct xe_eudebug_private_data *data;
+
+	data = mmap(0, ALIGN(sizeof(*data), PAGE_SIZE),
+		    PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
+	igt_assert(data != MAP_FAILED);
+
+	data->flags = flags;
+
+	return data;
+}
+
+static void xe_eudebug_private_data_destroy(struct xe_eudebug_private_data *data)
+{
+	munmap(data, ALIGN(sizeof(*data), PAGE_SIZE));
+}
+
 /**
  * SUBTEST: sysfs-toggle
  * Functionality: enable
@@ -69,9 +115,6 @@ static void test_sysfs_toggle(int fd)
 #define VM_BIND_UFENCE_NO_ACK		BIT(11)
 #define TEST_FAULTABLE			BIT(30)
 #define TEST_DISCOVERY			BIT(31)
-
-#define PAGE_SIZE SZ_4K
-#define MDATA_SIZE (WORK_IN_PROGRESS_DRM_XE_DEBUG_METADATA_NUM * PAGE_SIZE)
 
 #define BO_ADDR 0x1a0000
 
@@ -119,15 +162,16 @@ static void basic_vm_bind_client(int fd, struct xe_eudebug_client *c)
 	struct drm_xe_vm_bind_op_ext_attach_debug *ext = NULL;
 	uint32_t vm = xe_eudebug_client_vm_create(c, fd, DRM_XE_VM_CREATE_FLAG_LR_MODE, 0);
 	size_t bo_size = xe_get_default_alignment(fd);
-	bool test_discovery = c->flags & TEST_DISCOVERY;
-	bool test_metadata = c->flags & VM_BIND_METADATA;
+	struct xe_eudebug_private_data *data = c->data;
+	bool test_discovery = data->flags & TEST_DISCOVERY;
+	bool test_metadata = data->flags & VM_BIND_METADATA;
 	uint32_t bo = xe_bo_create(fd, 0, bo_size,
 				   system_memory(fd), 0);
 	uint64_t addr = 0x1a0000;
-	uint8_t *data = NULL;
+	uint8_t *metadata = NULL;
 
 	if (test_metadata)
-		ext = basic_vm_bind_metadata_ext_prepare(fd, c, &data);
+		ext = basic_vm_bind_metadata_ext_prepare(fd, c, &metadata);
 
 	xe_eudebug_client_vm_bind_flags(c, fd, vm, bo, 0, addr,
 					bo_size, 0, NULL, 0, to_user_pointer(ext));
@@ -140,7 +184,7 @@ static void basic_vm_bind_client(int fd, struct xe_eudebug_client *c)
 	xe_eudebug_client_vm_unbind(c, fd, vm, 0, addr, bo_size);
 
 	if (test_metadata)
-		basic_vm_bind_metadata_ext_del(fd, c, ext, data);
+		basic_vm_bind_metadata_ext_del(fd, c, ext, metadata);
 
 	gem_close(fd, bo);
 	xe_eudebug_client_vm_destroy(c, fd, vm);
@@ -150,7 +194,8 @@ static void basic_vm_bind_vm_destroy_client(int fd, struct xe_eudebug_client *c)
 {
 	uint32_t vm = xe_eudebug_client_vm_create(c, fd, DRM_XE_VM_CREATE_FLAG_LR_MODE, 0);
 	size_t bo_size = xe_get_default_alignment(fd);
-	bool test_discovery = c->flags & TEST_DISCOVERY;
+	struct xe_eudebug_private_data *data = c->data;
+	bool test_discovery = data->flags & TEST_DISCOVERY;
 	uint32_t bo = xe_bo_create(fd, 0, bo_size,
 				   system_memory(fd), 0);
 	uint64_t addr = 0x1a0000;
@@ -363,7 +408,8 @@ static void vm_bind_client(int fd, struct xe_eudebug_client *c)
 {
 	uint64_t op_ref_seqno, ref_seqno;
 	struct bind_list *bl;
-	bool test_discovery = c->flags & TEST_DISCOVERY;
+	struct xe_eudebug_private_data *data = c->data;
+	bool test_discovery = data->flags & TEST_DISCOVERY;
 	size_t bo_size = 3 * xe_get_default_alignment(fd);
 	uint32_t bo[2] = {
 		xe_bo_create(fd, 0, bo_size, system_memory(fd), 0),
@@ -430,11 +476,12 @@ static void vm_bind_client(int fd, struct xe_eudebug_client *c)
 
 static void run_basic_client(struct xe_eudebug_client *c)
 {
+	struct xe_eudebug_private_data *data = c->data;
 	int fd, i;
 
 	fd = xe_eudebug_client_open_driver(c);
 
-	if (c->flags & CREATE_VMS) {
+	if (data->flags & CREATE_VMS) {
 		const uint64_t flags[] = {
 			DRM_XE_VM_CREATE_FLAG_SCRATCH_PAGE | DRM_XE_VM_CREATE_FLAG_LR_MODE,
 			DRM_XE_VM_CREATE_FLAG_LR_MODE,
@@ -448,7 +495,7 @@ static void run_basic_client(struct xe_eudebug_client *c)
 			xe_eudebug_client_vm_destroy(c, fd, vms[i]);
 	}
 
-	if (c->flags & CREATE_EXEC_QUEUES) {
+	if (data->flags & CREATE_EXEC_QUEUES) {
 		struct drm_xe_exec_queue_create *create;
 		struct drm_xe_engine_class_instance *hwe;
 		struct drm_xe_ext_set_property eq_ext = {
@@ -478,13 +525,13 @@ static void run_basic_client(struct xe_eudebug_client *c)
 		xe_eudebug_client_vm_destroy(c, fd, vm);
 	}
 
-	if (c->flags & VM_BIND || c->flags & VM_BIND_METADATA)
+	if (data->flags & VM_BIND || data->flags & VM_BIND_METADATA)
 		basic_vm_bind_client(fd, c);
 
-	if (c->flags & VM_BIND_EXTENDED)
+	if (data->flags & VM_BIND_EXTENDED)
 		vm_bind_client(fd, c);
 
-	if (c->flags & VM_BIND_VM_DESTROY)
+	if (data->flags & VM_BIND_VM_DESTROY)
 		basic_vm_bind_vm_destroy_client(fd, c);
 
 	xe_eudebug_client_close_driver(c, fd);
@@ -801,6 +848,7 @@ static void test_close(int fd)
 #define MAX_EVENT_SIZE (32 * 1024)
 static void test_read_event(int fd)
 {
+	struct xe_eudebug_private_data *data;
 	struct drm_xe_eudebug_event *event;
 	struct xe_eudebug_debugger *d;
 	struct xe_eudebug_client *c;
@@ -808,8 +856,9 @@ static void test_read_event(int fd)
 	event = calloc(1, MAX_EVENT_SIZE);
 	igt_assert(event);
 
-	c = xe_eudebug_client_create(fd, run_basic_client, 0, NULL);
-	d = xe_eudebug_debugger_create(fd, 0, NULL);
+	data = xe_eudebug_private_data_create(0);
+	c = xe_eudebug_client_create(fd, run_basic_client, data);
+	d = xe_eudebug_debugger_create(fd, data);
 
 	igt_assert_eq(xe_eudebug_debugger_attach(d, c), 0);
 	igt_assert_eq(poll_event(d->fd, 500), 0);
@@ -888,6 +937,7 @@ static void test_read_event(int fd)
 
 	xe_eudebug_debugger_destroy(d);
 	xe_eudebug_client_destroy(c);
+	xe_eudebug_private_data_destroy(data);
 
 	free(event);
 }
@@ -954,14 +1004,19 @@ static void test_read_event(int fd)
 static void test_basic_sessions(int fd, uint64_t flags, int count, bool match_opposite)
 {
 	struct xe_eudebug_session **s;
+	struct xe_eudebug_private_data **data;
 	int i;
 
 	s = calloc(count, sizeof(*s));
+	data = calloc(count, sizeof(*data));
 
 	igt_assert(s);
+	igt_assert(data);
 
-	for (i = 0; i < count; i++)
-		s[i] = xe_eudebug_session_create(fd, run_basic_client, flags, NULL);
+	for (i = 0; i < count; i++) {
+		data[i] = xe_eudebug_private_data_create(flags);
+		s[i] = xe_eudebug_session_create(fd, run_basic_client, data[i]);
+	}
 
 	for (i = 0; i < count; i++)
 		xe_eudebug_session_run(s[i]);
@@ -969,8 +1024,13 @@ static void test_basic_sessions(int fd, uint64_t flags, int count, bool match_op
 	for (i = 0; i < count; i++)
 		xe_eudebug_session_check(s[i], match_opposite, 0);
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < count; i++) {
 		xe_eudebug_session_destroy(s[i]);
+		xe_eudebug_private_data_destroy(data[i]);
+	}
+
+	free(data);
+	free(s);
 }
 
 /**
@@ -1002,11 +1062,14 @@ static void test_basic_sessions(int fd, uint64_t flags, int count, bool match_op
  */
 static void test_basic_discovery(int fd, uint64_t flags, bool match_opposite)
 {
+	struct xe_eudebug_private_data *data;
 	struct xe_eudebug_debugger *d;
 	struct xe_eudebug_session *s;
 	struct xe_eudebug_client *c;
 
-	s = xe_eudebug_session_create(fd, run_basic_client, flags | TEST_DISCOVERY, NULL);
+	data = xe_eudebug_private_data_create(flags | TEST_DISCOVERY);
+
+	s = xe_eudebug_session_create(fd, run_basic_client, data);
 
 	c = s->client;
 	d = s->debugger;
@@ -1030,6 +1093,7 @@ static void test_basic_discovery(int fd, uint64_t flags, bool match_opposite)
 
 	xe_eudebug_session_check(s, match_opposite, 0);
 	xe_eudebug_session_destroy(s);
+	xe_eudebug_private_data_destroy(data);
 }
 
 #define RESOURCE_COUNT 16
@@ -1041,7 +1105,9 @@ static void test_basic_discovery(int fd, uint64_t flags, bool match_opposite)
 static void run_discovery_client(struct xe_eudebug_client *c)
 {
 	int fd[RESOURCE_COUNT], i;
-	bool skip_sleep = c->flags & (DISCOVERY_DESTROY_RESOURCES | DISCOVERY_CLOSE_CLIENT);
+
+	struct xe_eudebug_private_data *data = c->data;
+	bool skip_sleep = data->flags & (DISCOVERY_DESTROY_RESOURCES | DISCOVERY_CLOSE_CLIENT);
 	uint64_t addr = 0x1a0000;
 
 	srand(getpid());
@@ -1086,19 +1152,19 @@ static void run_discovery_client(struct xe_eudebug_client *c)
 
 			xe_eudebug_client_exec_queue_create(c, fd[i], &create);
 
-			if (c->flags & DISCOVERY_VM_BIND) {
+			if (data->flags & DISCOVERY_VM_BIND) {
 				xe_eudebug_client_vm_bind(c, fd[i], vm, bo, 0, addr, bo_size);
 				addr += bo_size;
 			}
 
-			if (c->flags & DISCOVERY_DESTROY_RESOURCES) {
+			if (data->flags & DISCOVERY_DESTROY_RESOURCES) {
 				xe_eudebug_client_exec_queue_destroy(c, fd[i], &create);
 				xe_eudebug_client_vm_destroy(c, fd[i], create.vm_id);
 				gem_close(fd[i], bo);
 			}
 		}
 
-		if (c->flags & DISCOVERY_CLOSE_CLIENT)
+		if (data->flags & DISCOVERY_CLOSE_CLIENT)
 			xe_eudebug_client_close_driver(c, fd[i]);
 	}
 }
@@ -1116,7 +1182,7 @@ static void run_discovery_client(struct xe_eudebug_client *c)
  * @empty:		resources destruction
  * @empty-clients:	client closure
  */
-static void *discovery_race_thread(void *data)
+static void *discovery_race_thread(void *thread_data)
 {
 	struct {
 		uint64_t client_handle;
@@ -1124,9 +1190,9 @@ static void *discovery_race_thread(void *data)
 		int exec_queue_count;
 		int vm_bind_op_count;
 	} clients[RESOURCE_COUNT];
-	struct xe_eudebug_session *s = data;
+	struct xe_eudebug_session *s = thread_data;
 	int expected = RESOURCE_COUNT * (1 + 2 * RESOURCE_COUNT);
-	uint64_t flags = s->debugger->flags;
+	struct xe_eudebug_private_data *data = s->debugger->data;
 	const int tries = 100;
 	bool done = false;
 	int ret = 0;
@@ -1154,7 +1220,7 @@ static void *discovery_race_thread(void *data)
 				 * sure we get at least one event before stopping.
 				 */
 				do
-					if (s->client->flags & DISCOVERY_SIGINT)
+					if (data->flags & DISCOVERY_SIGINT)
 						usleep(100000);
 					else
 						sleep(1);
@@ -1179,7 +1245,7 @@ static void *discovery_race_thread(void *data)
 							igt_assert_eq(clients[i].exec_queue_count,
 								      RESOURCE_COUNT);
 
-							if (s->client->flags & DISCOVERY_VM_BIND)
+							if (data->flags & DISCOVERY_VM_BIND)
 								igt_assert_eq(clients[i].vm_bind_op_count,
 									      RESOURCE_COUNT);
 						}
@@ -1222,7 +1288,7 @@ static void *discovery_race_thread(void *data)
 	}
 
 	/* Primary thread must read everything */
-	if (flags & PRIMARY_THREAD) {
+	if (data->flags & PRIMARY_THREAD) {
 		while ((ret = xe_eudebug_debugger_attach(s->debugger, s->client)) == -EBUSY)
 			usleep(100000);
 
@@ -1245,6 +1311,7 @@ static void test_race_discovery(int fd, uint64_t flags, int clients)
 {
 	const int debuggers_per_client = 3;
 	int count = clients * debuggers_per_client;
+	struct xe_eudebug_private_data *data;
 	struct xe_eudebug_session *sessions, *s;
 	struct xe_eudebug_client *c;
 	struct timespec t = {};
@@ -1255,17 +1322,19 @@ static void test_race_discovery(int fd, uint64_t flags, int clients)
 	threads = calloc(count, sizeof(*threads));
 
 	for (i = 0; i < clients; i++) {
-		c = xe_eudebug_client_create(fd, run_discovery_client, flags, NULL);
+		data = xe_eudebug_private_data_create(flags);
+		c = xe_eudebug_client_create(fd, run_discovery_client, data);
 		for (j = 0; j < debuggers_per_client; j++) {
+			data = xe_eudebug_private_data_create(flags | (!j ? PRIMARY_THREAD : 0));
 			s = &sessions[i * debuggers_per_client + j];
 			s->client = c;
-			s->debugger = xe_eudebug_debugger_create(fd, flags, NULL);
-			s->debugger->flags = flags | (!j ? PRIMARY_THREAD : 0);
+			s->debugger = xe_eudebug_debugger_create(fd, data);
 		}
 	}
 
 	for (i = 0; i < count; i++) {
-		if (sessions[i].debugger->flags & PRIMARY_THREAD)
+		data = sessions[i].debugger->data;
+		if (data->flags & PRIMARY_THREAD)
 			xe_eudebug_client_start(sessions[i].client);
 
 		pthread_create(&threads[i], NULL, discovery_race_thread, &sessions[i]);
@@ -1285,18 +1354,23 @@ static void test_race_discovery(int fd, uint64_t flags, int clients)
 	}
 
 	for (i = count - 1; i > 0; i--) {
-		if (sessions[i].debugger->flags & PRIMARY_THREAD) {
+		data = sessions[i].debugger->data;
+		if (data->flags & PRIMARY_THREAD) {
 			igt_assert_eq(sessions[i].client->seqno - 1,
 				      sessions[i].debugger->event_count);
 
 			xe_eudebug_event_log_compare(sessions[0].debugger->log,
 						     sessions[i].debugger->log,
 						     XE_EUDEBUG_FILTER_EVENT_VM_BIND);
-
+			xe_eudebug_private_data_destroy(sessions[i].client->data);
 			xe_eudebug_client_destroy(sessions[i].client);
 		}
+		xe_eudebug_private_data_destroy(sessions[i].debugger->data);
 		xe_eudebug_debugger_destroy(sessions[i].debugger);
 	}
+
+	free(sessions);
+	free(threads);
 }
 
 static void *attach_dettach_thread(void *data)
@@ -1330,6 +1404,7 @@ static void *attach_dettach_thread(void *data)
 
 static void test_empty_discovery(int fd, uint64_t flags, int clients)
 {
+	struct xe_eudebug_private_data **data;
 	struct xe_eudebug_session **s;
 	pthread_t *threads;
 	int i, expected = flags & DISCOVERY_CLOSE_CLIENT ? 0 : RESOURCE_COUNT;
@@ -1339,9 +1414,12 @@ static void test_empty_discovery(int fd, uint64_t flags, int clients)
 
 	s = calloc(clients, sizeof(struct xe_eudebug_session *));
 	threads = calloc(clients, sizeof(*threads));
+	data = calloc(clients, sizeof(*data));
 
-	for (i = 0; i < clients; i++)
-		s[i] = xe_eudebug_session_create(fd, run_discovery_client, flags, NULL);
+	for (i = 0; i < clients; i++) {
+		data[i] = xe_eudebug_private_data_create(flags);
+		s[i] = xe_eudebug_session_create(fd, run_discovery_client, data[i]);
+	}
 
 	for (i = 0; i < clients; i++) {
 		xe_eudebug_client_start(s[i]->client);
@@ -1365,8 +1443,13 @@ static void test_empty_discovery(int fd, uint64_t flags, int clients)
 
 		igt_assert_eq(s[i]->debugger->event_count, expected);
 
+		xe_eudebug_private_data_destroy(data[i]);
 		xe_eudebug_session_destroy(s[i]);
 	}
+
+	free(data);
+	free(threads);
+	free(s);
 }
 
 static void ufence_ack_trigger(struct xe_eudebug_debugger *d,
@@ -1386,15 +1469,21 @@ static void test_client_with_trigger(int fd, uint64_t flags, int count,
 				     struct drm_xe_engine_class_instance *hwe,
 				     bool match_opposite, uint32_t event_filter)
 {
+	struct xe_eudebug_private_data **data;
 	struct xe_eudebug_session **s;
 	int i;
 
+	data = calloc(count, sizeof(*data));
 	s = calloc(count, sizeof(*s));
 
+	igt_assert(data);
 	igt_assert(s);
 
-	for (i = 0; i < count; i++)
-		s[i] = xe_eudebug_session_create(fd, client_fn, flags, hwe);
+	for (i = 0; i < count; i++) {
+		data[i] = xe_eudebug_private_data_create(flags);
+		data[i]->hwe = hwe;
+		s[i] = xe_eudebug_session_create(fd, client_fn, data[i]);
+	}
 
 	if (trigger_fn)
 		for (i = 0; i < count; i++)
@@ -1410,8 +1499,13 @@ static void test_client_with_trigger(int fd, uint64_t flags, int count,
 	for (i = 0; i < count; i++)
 		xe_eudebug_session_check(s[i], match_opposite, event_filter);
 
-	for (i = 0; i < count; i++)
+	for (i = 0; i < count; i++) {
 		xe_eudebug_session_destroy(s[i]);
+		xe_eudebug_private_data_destroy(data[i]);
+	}
+
+	free(data);
+	free(s);
 }
 
 struct thread_fn_args {
@@ -1482,7 +1576,8 @@ static void test_basic_sessions_th(int fd, uint64_t flags, int num_clients, bool
 
 static void vm_access_client(struct xe_eudebug_client *c)
 {
-	struct drm_xe_engine_class_instance *hwe = c->ptr;
+	struct xe_eudebug_private_data *data = c->data;
+	struct drm_xe_engine_class_instance *hwe = data->hwe;
 	uint32_t vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE;
 	uint32_t bo_placement;
 	struct bind_list *bl;
@@ -1493,10 +1588,10 @@ static void vm_access_client(struct xe_eudebug_client *c)
 
 	fd = xe_eudebug_client_open_driver(c);
 
-	vm_flags |= (c->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
+	vm_flags |= (data->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
 	vm = xe_eudebug_client_vm_create(c, fd, vm_flags, 0);
 
-	if (c->flags & VM_BIND_OP_MAP_USERPTR)
+	if (data->flags & VM_BIND_OP_MAP_USERPTR)
 		bo_placement = 0;
 	else
 		bo_placement = vram_if_possible(fd, hwe->gt_id);
@@ -2098,6 +2193,7 @@ static void basic_ufence_client(struct xe_eudebug_client *c)
 	uint32_t bo = xe_bo_create(fd, 0, bo_size,
 				   system_memory(fd), 0);
 	struct ufence_bind *binds = create_binds_with_ufence(fd, n);
+	struct xe_eudebug_private_data *data = c->data;
 
 	for (int i = 0; i < n; i++) {
 		struct ufence_bind *b = &binds[i];
@@ -2106,7 +2202,7 @@ static void basic_ufence_client(struct xe_eudebug_client *c)
 						&b->f, 1, 0);
 	}
 
-	if (c->flags & VM_BIND_UFENCE_NO_ACK)
+	if (data->flags & VM_BIND_UFENCE_NO_ACK)
 		client_wait_ufences_no_ack(c, fd, vm, binds, n);
 	else
 		client_wait_ufences(c, fd, binds, n);
@@ -2159,17 +2255,19 @@ static void ufence_priv_destroy(struct ufence_priv *priv)
 
 static void ack_fences(struct xe_eudebug_debugger *d)
 {
-	struct ufence_priv *priv = d->ptr;
+	struct xe_eudebug_private_data *data = d->data;
+	struct ufence_priv *uf_priv = data->uf_priv;
 
-	for (int i = 0; i < priv->ufence_event_count; i++)
-		xe_eudebug_ack_ufence(d->fd, &priv->ufence_events[i]);
+	for (int i = 0; i < uf_priv->ufence_event_count; i++)
+		xe_eudebug_ack_ufence(d->fd, &uf_priv->ufence_events[i]);
 }
 
 static void basic_ufence_trigger(struct xe_eudebug_debugger *d,
 				 struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
-	struct ufence_priv *priv = d->ptr;
+	struct xe_eudebug_private_data *data = d->data;
+	struct ufence_priv *uf_priv = data->uf_priv;
 
 	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
 		char event_str[XE_EUDEBUG_EVENT_STRING_MAX_LEN];
@@ -2178,11 +2276,11 @@ static void basic_ufence_trigger(struct xe_eudebug_debugger *d,
 		xe_eudebug_event_to_str(e, event_str, XE_EUDEBUG_EVENT_STRING_MAX_LEN);
 		igt_debug("ufence event received: %s\n", event_str);
 
-		xe_eudebug_assert_f(d, priv->ufence_event_count < UFENCE_EVENT_COUNT_EXPECTED,
+		xe_eudebug_assert_f(d, uf_priv->ufence_event_count < UFENCE_EVENT_COUNT_EXPECTED,
 				    "surplus ufence event received: %s\n", event_str);
 		xe_eudebug_assert(d, ef->vm_bind_ref_seqno);
 
-		memcpy(&priv->ufence_events[priv->ufence_event_count++], ef, sizeof(*ef));
+		memcpy(&uf_priv->ufence_events[uf_priv->ufence_event_count++], ef, sizeof(*ef));
 
 		eb = (struct drm_xe_eudebug_event_vm_bind *)
 			xe_eudebug_event_log_find_seqno(d->log, ef->vm_bind_ref_seqno);
@@ -2242,14 +2340,15 @@ static int wait_for_ufence_events(struct ufence_priv *priv, int timeout_ms)
  */
 static void test_basic_ufence(int fd, uint64_t flags)
 {
+	struct xe_eudebug_private_data *data;
 	struct xe_eudebug_debugger *d;
 	struct xe_eudebug_session *s;
 	struct xe_eudebug_client *c;
-	struct ufence_priv *priv;
 	uint32_t filter = XE_EUDEBUG_FILTER_EVENT_VM_BIND_UFENCE;
 
-	priv = ufence_priv_create();
-	s = xe_eudebug_session_create(fd, basic_ufence_client, flags, priv);
+	data = xe_eudebug_private_data_create(flags);
+	data->uf_priv = ufence_priv_create();
+	s = xe_eudebug_session_create(fd, basic_ufence_client, data);
 	c = s->client;
 	d = s->debugger;
 
@@ -2264,28 +2363,28 @@ static void test_basic_ufence(int fd, uint64_t flags)
 	if (flags & VM_BIND_UFENCE_NO_ACK) {
 		xe_eudebug_debugger_wait_stage(s, STAGE_NO_ACK_READY_FOR_PARTIAL_ACK);
 		xe_eudebug_assert_f(d,
-				    wait_for_ufence_events(priv,
-							  XE_EUDEBUG_DEFAULT_TIMEOUT_SEC *
-							  MSEC_PER_SEC) == 0,
+				    wait_for_ufence_events(data->uf_priv,
+							   XE_EUDEBUG_DEFAULT_TIMEOUT_SEC *
+							   MSEC_PER_SEC) == 0,
 				    "missing ufence events\n");
 
 		for (int i = 0;
 		     i < UFENCE_EVENT_COUNT_EXPECTED - NO_ACK_HELD_COUNT; i++)
-			xe_eudebug_ack_ufence(d->fd, &priv->ufence_events[i]);
+			xe_eudebug_ack_ufence(d->fd, &data->uf_priv->ufence_events[i]);
 		xe_eudebug_debugger_signal_stage(d, STAGE_NO_ACK_PARTIAL_ACK_DONE);
 
 		xe_eudebug_debugger_wait_stage(s, STAGE_CLIENT_WAIT_ON_UFENCE_DONE);
 
 		for (int i = UFENCE_EVENT_COUNT_EXPECTED - NO_ACK_HELD_COUNT;
 		     i < UFENCE_EVENT_COUNT_EXPECTED; i++)
-			xe_eudebug_ack_ufence(d->fd, &priv->ufence_events[i]);
+			xe_eudebug_ack_ufence(d->fd, &data->uf_priv->ufence_events[i]);
 		xe_eudebug_debugger_signal_stage(d, STAGE_NO_ACK_FINAL_ACK_DONE);
 	} else {
 		xe_eudebug_debugger_wait_stage(s, STAGE_CLIENT_WAIT_ON_UFENCE_DONE);
 		xe_eudebug_assert_f(d,
-				    wait_for_ufence_events(priv,
-							  XE_EUDEBUG_DEFAULT_TIMEOUT_SEC *
-							  MSEC_PER_SEC) == 0,
+				    wait_for_ufence_events(data->uf_priv,
+							   XE_EUDEBUG_DEFAULT_TIMEOUT_SEC *
+							   MSEC_PER_SEC) == 0,
 				    "missing ufence events\n");
 
 		if (flags & VM_BIND_DELAY_UFENCE_ACK)
@@ -2316,25 +2415,9 @@ static void test_basic_ufence(int fd, uint64_t flags)
 	xe_eudebug_session_check(s, true, filter);
 
 	xe_eudebug_session_destroy(s);
-	ufence_priv_destroy(priv);
+	ufence_priv_destroy(data->uf_priv);
+	xe_eudebug_private_data_destroy(data);
 }
-
-struct vm_bind_clear_thread_priv {
-	struct drm_xe_engine_class_instance *hwe;
-	struct xe_eudebug_client *c;
-	pthread_t thread;
-	uint64_t region;
-	unsigned long sum;
-};
-
-struct vm_bind_clear_priv {
-	unsigned long unbind_count;
-	unsigned long bind_count;
-	unsigned long sum;
-	bool faultable;
-};
-
-#define VM_BIND_CLEAR_CLEAN_COOKIE 0x434c45414eULL
 
 static struct vm_bind_clear_priv *vm_bind_clear_priv_create(void)
 {
@@ -2353,7 +2436,7 @@ static void vm_bind_clear_priv_destroy(struct vm_bind_clear_priv *priv)
 	munmap(priv, ALIGN(sizeof(*priv), PAGE_SIZE));
 }
 
-static void *vm_bind_clear_thread(void *data)
+static void *vm_bind_clear_thread(void *thread_data)
 {
 	const uint32_t CS_GPR0 = 0x600;
 	const size_t batch_size = 16;
@@ -2365,10 +2448,11 @@ static void *vm_bind_clear_thread(void *data)
 		.base.name = XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG,
 		.cookie = VM_BIND_CLEAR_CLEAN_COOKIE,
 	};
-	struct vm_bind_clear_thread_priv *priv = data;
+	struct vm_bind_clear_thread_priv *priv = thread_data;
 	int fd = xe_eudebug_client_open_driver(priv->c);
 	uint32_t gtt_size = 1ull << min_t(uint32_t, xe_va_bits(fd), 48);
 	uint32_t vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE;
+	struct xe_eudebug_private_data *data = priv->c->data;
 	size_t bo_size = xe_bb_size(fd, batch_size);
 	unsigned long count = 0;
 	uint8_t *metadata_data;
@@ -2376,7 +2460,7 @@ static void *vm_bind_clear_thread(void *data)
 	uint64_t *fence_data;
 	uint32_t vm;
 
-	vm_flags |= (priv->c->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
+	vm_flags |= (data->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
 	vm = xe_eudebug_client_vm_create(priv->c, fd, vm_flags, 0);
 
 	metadata_data = aligned_alloc(PAGE_SIZE, PAGE_SIZE);
@@ -2506,7 +2590,8 @@ static void vm_bind_clear_client(struct xe_eudebug_client *c)
 	struct xe_device *xe_dev = xe_device_get(fd);
 	int count = xe_number_engines(fd) * xe_dev->mem_regions->num_mem_regions;
 	uint64_t memreg = all_memory_regions(fd);
-	struct vm_bind_clear_priv *priv = c->ptr;
+	struct xe_eudebug_private_data *data = c->data;
+	struct vm_bind_clear_priv *priv = data->vm_bind_priv;
 	int current = 0;
 	struct drm_xe_engine_class_instance *engine;
 	struct vm_bind_clear_thread_priv *threads;
@@ -2604,23 +2689,25 @@ static void vm_bind_clear_test_trigger(struct xe_eudebug_debugger *d,
 				       struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_vm_bind_op *eo = (void *)e;
-	struct vm_bind_clear_priv *priv = d->ptr;
+	struct xe_eudebug_private_data *data = d->data;
+	struct vm_bind_clear_priv *bind_clear_priv = data->vm_bind_priv;
 
 	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
 		igt_debug("vm bind op event received with ref %lld, addr 0x%llx, range 0x%llx\n",
 			  eo->vm_bind_ref_seqno, eo->addr, eo->range);
-		priv->bind_count++;
+		bind_clear_priv->bind_count++;
 	}
 
 	if (e->flags & DRM_XE_EUDEBUG_EVENT_DESTROY)
-		priv->unbind_count++;
+		bind_clear_priv->unbind_count++;
 }
 
 static void vm_bind_clear_ack_trigger(struct xe_eudebug_debugger *d,
 				      struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
-	struct vm_bind_clear_priv *priv = d->ptr;
+	struct xe_eudebug_private_data *data = d->data;
+	struct vm_bind_clear_priv *bind_clear_priv = data->vm_bind_priv;
 
 	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
 		if (random() & 1) {
@@ -2646,7 +2733,7 @@ static void vm_bind_clear_ack_trigger(struct xe_eudebug_debugger *d,
 			 * memory check here; the thread's igt_assert_eq(*map, 0)
 			 * validates correctness after first GPU access.
 			 */
-			if (priv->faultable)
+			if (bind_clear_priv->faultable)
 				goto ack_ufence;
 
 			eb = (struct drm_xe_eudebug_event_vm_bind *)
@@ -2685,14 +2772,19 @@ ack_ufence:
  */
 static void test_vm_bind_clear(int fd, uint64_t flags)
 {
-	struct vm_bind_clear_priv *priv;
+	struct xe_eudebug_private_data *data;
+	struct vm_bind_clear_priv *bind_clear_priv;
 	struct xe_eudebug_session *s;
 
 	igt_require(!(flags & TEST_FAULTABLE) || !xe_supports_faults(fd));
 
-	priv = vm_bind_clear_priv_create();
-	priv->faultable = !!(flags & TEST_FAULTABLE);
-	s = xe_eudebug_session_create(fd, vm_bind_clear_client, flags, priv);
+	data = xe_eudebug_private_data_create(flags);
+
+	bind_clear_priv = vm_bind_clear_priv_create();
+	bind_clear_priv->faultable = !!(flags & TEST_FAULTABLE);
+
+	data->vm_bind_priv = bind_clear_priv;
+	s = xe_eudebug_session_create(fd, vm_bind_clear_client, data);
 
 	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_OP,
 					vm_bind_clear_test_trigger);
@@ -2706,7 +2798,7 @@ static void test_vm_bind_clear(int fd, uint64_t flags)
 	xe_eudebug_client_wait_done(s->client);
 	xe_eudebug_debugger_stop_worker(s->debugger);
 
-	igt_assert_eq(priv->bind_count, priv->unbind_count);
+	igt_assert_eq(bind_clear_priv->bind_count, bind_clear_priv->unbind_count);
 	/*
 	 * In faultable VM mode the GPU resolves page faults for system memory
 	 * (e.g. the user-fence page), causing the kernel to emit additional
@@ -2714,12 +2806,13 @@ static void test_vm_bind_clear(int fd, uint64_t flags)
 	 * Allow bind_count to exceed sum*2 in that case.
 	 */
 	if (flags & TEST_FAULTABLE)
-		igt_assert_lte(priv->sum * 2, priv->bind_count);
+		igt_assert_lte(bind_clear_priv->sum * 2, bind_clear_priv->bind_count);
 	else
-		igt_assert_eq(priv->sum * 2, priv->bind_count);
+		igt_assert_eq(bind_clear_priv->sum * 2, bind_clear_priv->bind_count);
 
 	xe_eudebug_session_destroy(s);
-	vm_bind_clear_priv_destroy(priv);
+	vm_bind_clear_priv_destroy(bind_clear_priv);
+	xe_eudebug_private_data_destroy(data);
 }
 
 #define UFENCE_CLIENT_VM_TEST_VAL_START 0xaaaaaaaa
@@ -2727,6 +2820,7 @@ static void test_vm_bind_clear(int fd, uint64_t flags)
 
 static void vma_ufence_client(struct xe_eudebug_client *c)
 {
+	struct xe_eudebug_private_data *data = c->data;
 	const unsigned int n = UFENCE_EVENT_COUNT_EXPECTED;
 	int fd = xe_eudebug_client_open_driver(c);
 	struct ufence_bind *binds = create_binds_with_ufence(fd, n);
@@ -2737,7 +2831,7 @@ static void vma_ufence_client(struct xe_eudebug_client *c)
 	uint32_t *ptr[UFENCE_EVENT_COUNT_EXPECTED];
 	uint32_t vm;
 
-	vm_flags |= (c->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
+	vm_flags |= (data->flags & TEST_FAULTABLE) ? DRM_XE_VM_CREATE_FLAG_FAULT_MODE : 0;
 	vm = xe_eudebug_client_vm_create(c, fd, vm_flags, 0);
 
 	for (int i = 0; i < n; i++) {
@@ -2841,12 +2935,13 @@ static void vma_ufence_op_trigger(struct xe_eudebug_debugger *d,
 				  struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_vm_bind_op *eo = (void *)e;
-	struct ufence_priv *priv = d->ptr;
+	struct xe_eudebug_private_data *data = d->data;
+	struct ufence_priv *ufence_priv = data->uf_priv;
 
 	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
 		char event_str[XE_EUDEBUG_EVENT_STRING_MAX_LEN];
 		struct drm_xe_eudebug_event_vm_bind *eb;
-		unsigned int op_count = priv->vm_bind_op_count++;
+		unsigned int op_count = ufence_priv->vm_bind_op_count++;
 
 		xe_eudebug_event_to_str(e, event_str, XE_EUDEBUG_EVENT_STRING_MAX_LEN);
 		igt_debug("vm bind op event: ref %lld, addr 0x%llx, range 0x%llx, op_count %u\n",
@@ -2864,9 +2959,9 @@ static void vma_ufence_op_trigger(struct xe_eudebug_debugger *d,
 		xe_eudebug_assert_f(d, eb->flags & DRM_XE_EUDEBUG_EVENT_VM_BIND_FLAG_UFENCE,
 				    "vm bind event does not have ufence: %s\n", event_str);
 
-		priv->ufence_event_seqno[op_count] = eo->vm_bind_ref_seqno;
-		priv->ufence_event_vm_addr_start[op_count] = eo->addr;
-		priv->ufence_event_vm_addr_range[op_count] = eo->range;
+		ufence_priv->ufence_event_seqno[op_count] = eo->vm_bind_ref_seqno;
+		ufence_priv->ufence_event_vm_addr_start[op_count] = eo->addr;
+		ufence_priv->ufence_event_vm_addr_range[op_count] = eo->range;
 	}
 }
 
@@ -2874,23 +2969,24 @@ static void vma_ufence_trigger(struct xe_eudebug_debugger *d,
 			       struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_vm_bind_ufence *ef = (void *)e;
-	struct ufence_priv *priv = d->ptr;
-	unsigned int ufence_count = priv->ufence_event_count;
+	struct xe_eudebug_private_data *data = d->data;
+	struct ufence_priv *uf_priv = data->uf_priv;
+	unsigned int ufence_count = uf_priv->ufence_event_count;
 
 	if (e->flags & DRM_XE_EUDEBUG_EVENT_CREATE) {
 		char event_str[XE_EUDEBUG_EVENT_STRING_MAX_LEN];
 		struct drm_xe_eudebug_event_vm_bind *eb;
-		uint64_t addr = priv->ufence_event_vm_addr_start[ufence_count];
-		uint64_t range = priv->ufence_event_vm_addr_range[ufence_count];
+		uint64_t addr = uf_priv->ufence_event_vm_addr_start[ufence_count];
+		uint64_t range = uf_priv->ufence_event_vm_addr_range[ufence_count];
 
 		xe_eudebug_event_to_str(e, event_str, XE_EUDEBUG_EVENT_STRING_MAX_LEN);
 		igt_debug("ufence event received: %s\n", event_str);
 
-		xe_eudebug_assert_f(d, priv->ufence_event_count < UFENCE_EVENT_COUNT_EXPECTED,
+		xe_eudebug_assert_f(d, uf_priv->ufence_event_count < UFENCE_EVENT_COUNT_EXPECTED,
 				    "surplus ufence event received: %s\n", event_str);
 		xe_eudebug_assert(d, ef->vm_bind_ref_seqno);
 
-		memcpy(&priv->ufence_events[priv->ufence_event_count++], ef, sizeof(*ef));
+		memcpy(&uf_priv->ufence_events[uf_priv->ufence_event_count++], ef, sizeof(*ef));
 
 		eb = (struct drm_xe_eudebug_event_vm_bind *)
 			xe_eudebug_event_log_find_seqno(d->log, ef->vm_bind_ref_seqno);
@@ -2923,13 +3019,15 @@ static void vma_ufence_trigger(struct xe_eudebug_debugger *d,
  */
 static void test_vma_ufence(int fd, uint64_t flags)
 {
+	struct xe_eudebug_private_data *data;
 	struct xe_eudebug_session *s;
-	struct ufence_priv *priv;
 
 	igt_require(!(flags & TEST_FAULTABLE) || !xe_supports_faults(fd));
 
-	priv = ufence_priv_create();
-	s = xe_eudebug_session_create(fd, vma_ufence_client, flags, priv);
+	data = xe_eudebug_private_data_create(flags);
+	data->uf_priv = ufence_priv_create();
+
+	s = xe_eudebug_session_create(fd, vma_ufence_client, data);
 
 	xe_eudebug_debugger_add_trigger(s->debugger,
 					DRM_XE_EUDEBUG_EVENT_VM_BIND_OP,
@@ -2951,7 +3049,8 @@ static void test_vma_ufence(int fd, uint64_t flags)
 	xe_eudebug_session_check(s, true, XE_EUDEBUG_FILTER_EVENT_VM_BIND_UFENCE);
 
 	xe_eudebug_session_destroy(s);
-	ufence_priv_destroy(priv);
+	ufence_priv_destroy(data->uf_priv);
+	xe_eudebug_private_data_destroy(data);
 }
 
 /**
