@@ -702,17 +702,20 @@ static void bo_ctx_create(int fd, int gt, uint64_t addr, size_t bo_size,
 static void fill_mixed_engine(struct gt_thread_data *t, int iter,
 			      struct drm_xe_engine_class_instance *instance)
 {
-	const uint16_t classes[] = {
-		DRM_XE_ENGINE_CLASS_COPY,
-		DRM_XE_ENGINE_CLASS_RENDER,
-		DRM_XE_ENGINE_CLASS_COMPUTE,
-		DRM_XE_ENGINE_CLASS_VIDEO_DECODE,
-		DRM_XE_ENGINE_CLASS_VIDEO_ENHANCE,
-	};
+	struct drm_xe_engine_class_instance *hwe;
+	struct drm_xe_engine_class_instance engines[64];
+	int n = 0;
 
-	instance->gt_id = t->gt;
-	instance->engine_instance = 0;
-	instance->engine_class = classes[(iter + t->id) % ARRAY_SIZE(classes)];
+	xe_for_each_engine(t->fd, hwe) {
+		if (hwe->gt_id != t->gt)
+			continue;
+		engines[n++] = *hwe;
+		if (n == ARRAY_SIZE(engines))
+			break;
+	}
+
+	igt_assert_f(n > 0, "GT %d exposes no engines\n", t->gt);
+	*instance = engines[(iter + t->id) % n];
 }
 
 static void pressure_bo_create(int fd, uint32_t vm, int gt,
