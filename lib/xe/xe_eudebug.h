@@ -27,10 +27,9 @@ enum xe_eudebug_debugger_worker_state {
 
 struct xe_eudebug_debugger {
 	int fd;
-	uint64_t flags;
 
 	/* Used to smuggle private data */
-	void *ptr;
+	void *data;
 
 	struct xe_eudebug_event_log *log;
 
@@ -55,10 +54,9 @@ struct xe_eudebug_debugger {
 struct xe_eudebug_client {
 	int pid;
 	uint64_t seqno;
-	uint64_t flags;
 
 	/* Used to smuggle private data */
-	void *ptr;
+	void *data;
 
 	struct xe_eudebug_event_log *log;
 
@@ -188,7 +186,7 @@ void xe_eudebug_event_log_match_opposite(struct xe_eudebug_event_log *l, uint32_
 
 bool xe_eudebug_debugger_available(int fd);
 struct xe_eudebug_debugger *
-xe_eudebug_debugger_create(int xe, uint64_t flags, void *data);
+xe_eudebug_debugger_create(int xe, void *data);
 void xe_eudebug_debugger_destroy(struct xe_eudebug_debugger *d);
 int xe_eudebug_debugger_attach(struct xe_eudebug_debugger *d, struct xe_eudebug_client *c);
 int xe_eudebug_debugger_reattach(struct xe_eudebug_debugger *d, pid_t pid);
@@ -206,9 +204,9 @@ void xe_eudebug_debugger_kill(struct xe_eudebug_debugger *d, int sig);
 
 struct xe_eudebug_client *
 xe_eudebug_client_create_timeout(int master_fd, xe_eudebug_client_work_fn work,
-                                 uint64_t flags, void *data, int timeout_s);
+				 void *data, int timeout_s);
 struct xe_eudebug_client *
-xe_eudebug_client_create(int xe, xe_eudebug_client_work_fn work, uint64_t flags, void *data);
+xe_eudebug_client_create(int xe, xe_eudebug_client_work_fn work, void *data);
 void xe_eudebug_client_destroy(struct xe_eudebug_client *c);
 void xe_eudebug_client_start(struct xe_eudebug_client *c);
 void xe_eudebug_client_stop(struct xe_eudebug_client *c);
@@ -268,7 +266,6 @@ void xe_eudebug_client_metadata_destroy(struct xe_eudebug_client *c, int fd,
 
 struct xe_eudebug_session *xe_eudebug_session_create(int fd,
 						     xe_eudebug_client_work_fn work,
-						     unsigned int flags,
 						     void *test_private);
 void xe_eudebug_session_destroy(struct xe_eudebug_session *s);
 void xe_eudebug_session_run(struct xe_eudebug_session *s);
