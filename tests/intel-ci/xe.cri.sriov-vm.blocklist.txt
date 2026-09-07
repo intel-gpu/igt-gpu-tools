@@ -1,0 +1,6 @@
+##################################################################
+# This test crash is blocking the execution on VM,
+# hence temporarly blocked.
+##################################################################
+igt@xe_exec_fault_mode@invalid-va
+igt@xe_exec_system_allocator@fault
