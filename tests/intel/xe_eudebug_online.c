@@ -2141,7 +2141,8 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 {
 	struct online_debug_data *data = d->ptr;
 	uint32_t val, cur_ip = 0, next_bp;
-	int cur_instr;
+	uint32_t mismatch_ip = 0;
+	int cur_instr, mismatch_thread = -1;
 	int ret;
 	uint64_t seqno = 0;
 
@@ -2152,15 +2153,22 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
 		val = vm_read_target_u32(data, get_thread_space_address(data, 0));
 		igt_debug("Waiting for all %d threads stopped at ip %#x\n", data->thread_count, val);
-		for (int i = 1; i < data->thread_count; ++i)
-			if (val != vm_read_target_u32(data, get_thread_space_address(data, i)))
+		for (int i = 1; i < data->thread_count; ++i) {
+			mismatch_ip = vm_read_target_u32(data, get_thread_space_address(data, i));
+			if (val != mismatch_ip) {
+				mismatch_thread = i;
 				goto retry;
+			}
+		}
 		cur_ip = val;
 		break;
 	retry:
 		usleep(10000);
 	}
-	igt_assert_f(cur_ip, "Timeout waiting for all threads stopped at the same ip(%#x).\n", val);
+	igt_assert_f(cur_ip, "Timeout waiting for all threads stopped at the same ip(%#x): "
+		     "thread=%d has ip=%#x, steps=%" PRIu32 "/%" PRIu32 "\n",
+		     val, mismatch_thread, mismatch_ip, data->steps_done,
+		     data->instruction_count + 2);
 
 	/* On older platforms IPs are relative to Instruction Base Address. Bspec: 56626 */
 	if (data->gfx_ver < 3500)
@@ -2220,7 +2228,9 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 		vm_read_target(data, ptr, data->target_size, 0);
 		for (int i = 0; i < data->target_size / 4; ++i)
 			igt_assert_f(ptr[i] != CACHING_POISON_VALUE,
-				     "Poison value found at %04d!\n", 4 * i);
+				     "Poison value found at %04d: value=%#x, step=%" PRIu32
+				     ", ip=%#x, instruction=%d\n",
+				     4 * i, ptr[i], data->steps_done, cur_ip, cur_instr);
 		free(ptr);
 	}
 	++data->steps_done;
