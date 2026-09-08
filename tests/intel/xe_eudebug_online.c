@@ -2228,8 +2228,13 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 resume:
 	ret = __eu_ctl_from_event(d->fd, e, DRM_XE_EUDEBUG_EU_CONTROL_CMD_RESUME, &seqno);
 	data->last_eu_control_seqno = seqno;
-	if (data->steps_done < data->instruction_count + 2)
+	if (data->steps_done < data->instruction_count + 2) {
 		igt_assert_eq(ret, 0);
+	} else if (ret) {
+		igt_debug("Final/stale resume failed: ret=%d, seqno=%" PRIu64
+			  ", steps=%" PRIu32 "/%" PRIu32 "\n",
+			  ret, seqno, data->steps_done, data->instruction_count + 2);
+	}
 
 }
 
