@@ -2145,8 +2145,6 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	int ret;
 	uint64_t seqno = 0;
 
-	if (data->last_eu_control_seqno > e->seqno)
-		return;
 	/* handle every breakpoint only once */
 	if (data->steps_done >= data->instruction_count + 2)
 		goto resume;
