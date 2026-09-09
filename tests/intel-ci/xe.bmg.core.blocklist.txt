@@ -69,9 +69,8 @@ igt@xe_pm@d3hot-i2c
 ##################################################################
 # Expected skip as tests not applicable for BMG
 ##################################################################
-igt@xe_non_msix@walker-interrupt-notification-non-msix
 igt@xe_pat@xa-app-transient-media-(?:on|off)
-igt@xe_prefetch_fault@prefetch-fault(?:-svm)?
+igt@xe_prefetch_fault@.*
 igt@xe_pat@l2-flush-opt-svm-pat-restrict
 #####################################################################
 #page reclaim/page reclaim hw assist support is not available for BMG
