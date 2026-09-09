@@ -60,8 +60,6 @@ igt@.*@.*tiles
 # Valid skip: Test applicable only for pre xe3p
 ##################################################################
 igt@xe_eudebug_online@pagefault-one-of-many
-igt@xe_eudebug_online@pagefault-read-stress
-igt@xe_eudebug_online@pagefault-write-stress
 ##################################################################
 # Valid Skip: Page Reclamation feature is not supported on CRI
 ##################################################################
