@@ -1,0 +1,6 @@
+#####################################################################
+#Tests are expected to be skipped because the required kernel
+#CONFIG_DRM_VGEM configuration is not enabled.
+######################################################################
+igt@xe_pat@prime-external-import-coh
+##################################################################
