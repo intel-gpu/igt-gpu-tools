@@ -763,6 +763,32 @@ WAIT_HOST:
 	)");
 }
 
+/**
+ * emit_shader_pagefault_one_of_many:
+ * @shader: shader to be modified
+ * @pf_thread_number: thread number to trigger pagefault
+ *
+ * Emit code to trigger pagefault for one of many threads in a thread group.
+ */
+static void emit_shader_pagefault_one_of_many(struct gpgpu_shader *shader, uint32_t pf_thread_number)
+{
+	emit_iga64_code(shader, pagefault_one_of_many, R"(
+#if GFX_VER >= 2000
+	// prepare load descriptor for page-faulting address
+	mov (8) r30.0<1>:uq 0x0:uq
+	mov (1) r30.0<1>:uq 0x12345678000:uq // PF address
+	mov (1) r30.2<1>:ud 0x3f:ud
+	mov (1) r30.4<1>:ud 0x3f:ud
+	mov (1) r30.7<1>:ud 0x3:ud // 4 bytes
+	// calculate thread id: r20.0 = dim.x * tgid.y + tgid.x
+	mad (1) r20.0<1>:ud r0.1<0;0>:ud r0.6<0;0>:ud r1.4<0>:ud
+	// page-fault only for arbitrary thread
+	cmp (1) (eq)f0.0 null<1>:ud r20.0<0;1,0>:ud ARG(0):ud
+(f0.0)	send.ugm (1) r31 r30 null 0x0 0x2128403 // load_block2d.ugm.d32t.a64.uc.uc
+#endif
+	)", pf_thread_number);
+}
+
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
 	struct dim_t w_dim = walker_dimensions(data->thread_count);
@@ -846,21 +872,7 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 		else if (data->flags & SHADER_PAGEFAULT_WRITE)
 			gpgpu_shader__write_a64_d32(shader, BAD_OFFSET, BAD_CANARY);
 		else if (data->flags & SHADER_PAGEFAULT_ONE_OF_MANY)
-			emit_iga64_code(shader, pagefault_one_of_many, R"(
-#if GFX_VER >= 2000
-	// prepare load descriptor for page-faulting address
-	mov (8) r30.0<1>:uq 0x0:uq
-	mov (1) r30.0<1>:uq 0x12345678000:uq // PF address
-	mov (1) r30.2<1>:ud 0x3f:ud
-	mov (1) r30.4<1>:ud 0x3f:ud
-	mov (1) r30.7<1>:ud 0x3:ud // 4 bytes
-	// calculate thread id: r20.0 = dim.x * tgid.y + tgid.x
-	mad (1) r20.0<1>:ud r0.1<0;0>:ud r0.6<0;0>:ud r1.4<0>:ud
-	// page-fault only for arbitrary thread
-	cmp (1) (eq)f0.0 null<1>:ud r20.0<0;1,0>:ud ARG(0):ud
-(f0.0)	send.ugm (1) r31 r30 null 0x0 0x2128403 // load_block2d.ugm.d32t.a64.uc.uc
-#endif
-			)", data->pf_thread_number);
+			emit_shader_pagefault_one_of_many(shader, data->pf_thread_number);
 
 		gpgpu_shader__label(shader, 0);
 		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
