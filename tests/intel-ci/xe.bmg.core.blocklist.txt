@@ -94,3 +94,8 @@ igt@(.*multigpu.*|xe_peer2peer.*).*
 ####################################################################
 igt@xe_compute@ccs-mode-compute-kernel
 ####################################################################
+# Memory page offlining works on CRI only
+##################################################################
+igt@xe_mempage_offline@inject-single-page
+igt@xe_mempage_offline@inject-duplicate-page
+##################################################################

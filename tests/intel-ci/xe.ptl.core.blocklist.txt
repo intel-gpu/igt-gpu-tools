@@ -90,3 +90,8 @@ igt@xe_fault_injection@exec-queue-create-fail-xe_pxp_exec_queue_add
 ##################################################################
 igt@.*survivability.*
 #################################################################
+# Memory page offlining works on CRI only
+##################################################################
+igt@xe_mempage_offline@inject-single-page
+igt@xe_mempage_offline@inject-duplicate-page
+##################################################################

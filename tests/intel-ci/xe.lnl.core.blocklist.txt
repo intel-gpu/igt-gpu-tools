@@ -108,3 +108,8 @@ igt@xe_module_load@force-load
 #################################################################
 igt@xe_pm@d3hot-i2c
 ##################################################################
+# Memory page offlining works on CRI only
+##################################################################
+igt@xe_mempage_offline@inject-single-page
+igt@xe_mempage_offline@inject-duplicate-page
+##################################################################
