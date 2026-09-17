@@ -107,3 +107,8 @@ igt@xe_exec_sip@.*
 igt@xe_exec_sip_eudebug@.*
 igt@xe_live_ktest@xe_eudebug
 ##################################################################
+# Memory page offlining works on CRI only
+##################################################################
+igt@xe_mempage_offline@inject-single-page
+igt@xe_mempage_offline@inject-duplicate-page
+##################################################################
