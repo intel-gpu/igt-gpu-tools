@@ -3,7 +3,7 @@
 
 #include "gpgpu_shader.h"
 
-#define MD5_SUM_IGA64_ASMS 3fd5f9deaf84099f1738e22e047df576
+#define MD5_SUM_IGA64_ASMS 9a949d268cadd1af46b3921e8a2e7a4a
 
 struct iga64_template const iga64_code_store_sr0_0[] = {
 	{ .gfx_ver = 3500, .size = 52, .code = (const uint32_t []) {
@@ -101,6 +101,19 @@ struct iga64_template const iga64_code_e64b_sso_arf[] = {
 		0x80000070, 0x00018220, 0x12000b74, 0x00000003,
 		0x84000966, 0x80118220, 0x02008010, 0x80000000,
 		0x80000965, 0x80018220, 0x02008000, 0x7ffffffd,
+		0x80000901, 0x00010000, 0x00000000, 0x00000000,
+	}},
+	{ .gfx_ver = 0, .size = 0, .code = (const uint32_t []) {
+
+	}}
+};
+
+struct iga64_template const iga64_code_sync_bar[] = {
+	{ .gfx_ver = 3500, .size = 20, .code = (const uint32_t []) {
+		0x8000c033, 0x00000000, 0x3000000c, 0x00040000,
+		0x80000001, 0x00010000, 0xe0000000, 0x00000000,
+		0x80000001, 0x00010000, 0x20000000, 0x00000000,
+		0x80000001, 0x00010000, 0x30000000, 0x00000000,
 		0x80000901, 0x00010000, 0x00000000, 0x00000000,
 	}},
 	{ .gfx_ver = 0, .size = 0, .code = (const uint32_t []) {
