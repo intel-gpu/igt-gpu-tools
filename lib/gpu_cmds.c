@@ -950,6 +950,16 @@ static void idd2_set_grfs_per_thread(struct xe3p_interface_descriptor_data *idd,
 		( 0,  1,  2,  3,  4,  5,   7,   9,  15));
 }
 
+/* bspec: 55400 */
+static void idd2_set_number_of_barriers(struct xe3p_interface_descriptor_data *idd,
+					const struct gpgpu_shader *shdr)
+{
+	igt_assert_lte(shdr->number_of_barriers, 32);
+	idd->dw05.number_of_barriers = lookup_lower_bound(shdr->number_of_barriers,
+		(0, 1, 2, 4, 8, 16, 24, 32),
+		(0, 1, 2, 3, 4,  5,  6,  7));
+}
+
 /* bspec: 75546 */
 static void idd2_set_slm_size(struct xe3p_interface_descriptor_data *idd,
 		     const struct gpgpu_shader *shdr)
@@ -985,6 +995,7 @@ xe3p_fill_interface_descriptor(struct intel_bb *ibb,
 		idd2_set_grfs_per_thread(idd, shdr);
 
 	idd->dw05.number_of_threads_in_gpgpu_thread_group = shdr->num_threads_in_tg;
+	idd2_set_number_of_barriers(idd, shdr);
 
 	if (shdr->slm_size)
 		idd2_set_slm_size(idd, shdr);

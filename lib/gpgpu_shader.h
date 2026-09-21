@@ -39,6 +39,7 @@ struct gpgpu_shader {
 	int grfs_per_thread;
 	int slm_size;
 	bool bb_sync;
+	uint32_t number_of_barriers;
 };
 
 struct iga64_template {
