@@ -57,6 +57,7 @@
 #define TRIGGER_RESUME_ONE		BIT(31)
 #define PAGEFAULT_STRESS_TEST		BIT(38)
 #define SHADER_PAGEFAULT_ONE_OF_MANY	BIT(39)
+#define SHADER_BREAKPOINT_SYNC_BAR		BIT(48)
 
 #define SHADER_PAGEFAULT	(SHADER_PAGEFAULT_READ | SHADER_PAGEFAULT_WRITE |\
 				 SHADER_PAGEFAULT_ATOMIC_READ | SHADER_PAGEFAULT_ATOMIC_WRITE |\
@@ -134,6 +135,7 @@ struct online_debug_data {
 	int max_subslices_per_slice;
 	struct dim_t w_dim;
 	int thread_resumed;
+	bool single_thread_resumed;
 	struct single_step {
 		struct sip_arf_sso *arfs;
 		uint32_t current_thread;
@@ -485,6 +487,9 @@ static void vm_write_target_u32(struct online_debug_data *data, uint32_t value, 
 
 static int get_number_of_threads(struct online_debug_data *data)
 {
+	if (data->flags & SHADER_BREAKPOINT_SYNC_BAR)
+		return 4;
+
 	if (data->flags & (PAGEFAULT_STRESS_TEST | SHADER_PAGEFAULT_ONE_OF_MANY))
 		return xe_query_eu_thread_count(data->drm_fd, 0);
 
@@ -667,6 +672,22 @@ WAIT_HOST:
 	)");
 }
 
+static void emit_sync_bar(struct gpgpu_shader *shdr, uint32_t threadgroup_size)
+{
+	igt_assert(threadgroup_size > 0);
+	igt_assert(threadgroup_size <= 64);
+
+	shdr->num_threads_in_tg = threadgroup_size;
+	shdr->number_of_barriers = 1;
+
+	emit_iga64_code(shdr, sync_bar, R"(
+#if GFX_VER >= 3500
+(W)	sendg.gtwy(1)	null	r0:1	null	0x4
+(W)	sync.bar	null
+#endif
+	)");
+}
+
 static void emit_e64b_single_step_one_sip(struct gpgpu_shader *shdr)
 {
 	igt_assert(shdr->gfx_ver >= 3500);
@@ -821,7 +842,7 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 	if (intel_gen_per_context_eudebug(data->drm_fd)) {
 		if (data->flags & (SHADER_BREAKPOINT | TRIGGER_RESUME_SET_BP | SHADER_SINGLE_STEP |
 		    SHADER_N_NOOP_BREAKPOINT | TRIGGER_UFENCE_SET_BREAKPOINT | SHADER_CACHING_SRAM |
-		    SHADER_CACHING_VRAM))
+		    SHADER_CACHING_VRAM | SHADER_BREAKPOINT_SYNC_BAR))
 			shader->exception_config |= SHADER_EXCEPTION_BREAKPOINT;
 		if (data->flags & SHADER_LOOP)
 			shader->exception_config |= SHADER_EXCEPTION_FE_FEH;
@@ -842,13 +863,17 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 			emit_e64b_atomic_read_page_fault(shader, pf_addr);
 		else if (data->flags & SHADER_PAGEFAULT_ATOMIC_WRITE)
 			emit_e64b_atomic_write_page_fault(shader, pf_addr);
-	} else if (!(data->flags & TRIGGER_RESUME_SINGLE_WALK)) {
+	} else if (!(data->flags & (TRIGGER_RESUME_SINGLE_WALK | SHADER_BREAKPOINT_SYNC_BAR))) {
 		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
 	}
 
 	if (data->flags & SHADER_BREAKPOINT) {
 		gpgpu_shader__nop(shader);
 		gpgpu_shader__breakpoint(shader);
+	} else if (data->flags & SHADER_BREAKPOINT_SYNC_BAR) {
+		gpgpu_shader__nop(shader);
+		gpgpu_shader__breakpoint(shader);
+		emit_sync_bar(shader, data->thread_count);
 	} else if (data->flags & SHADER_LOOP) {
 		gpgpu_shader__label(shader, 0);
 		gpgpu_shader__write_dword(shader, SHADER_CANARY, 0);
@@ -905,8 +930,9 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 	sip = gpgpu_shader_create(data->drm_fd);
 
 	if (sip->gfx_ver >= 3500 &&
-	    (data->flags & (SHADER_PAGEFAULT | TRIGGER_RESUME_SINGLE_WALK))) {
-		if (data->flags & SHADER_PAGEFAULT)
+	    (data->flags & (SHADER_PAGEFAULT | TRIGGER_RESUME_SINGLE_WALK |
+						    SHADER_BREAKPOINT_SYNC_BAR))) {
+		if (data->flags & (SHADER_PAGEFAULT | SHADER_BREAKPOINT_SYNC_BAR))
 			emit_e64b_store_arf(sip);
 		else if (data->flags & TRIGGER_RESUME_SINGLE_WALK)
 			emit_e64b_single_step_one_sip(sip);
@@ -1797,6 +1823,67 @@ static void sync_host_e64_resume_trigger(struct xe_eudebug_debugger *d,
 				      NULL, 0);
 
 	count++;
+}
+
+static int sync_bar_wait_threads_halted(struct online_debug_data *data)
+{
+	size_t arf_size = sizeof(struct sip_arf_dump);
+	size_t halted_off = offsetof(struct sip_arf_dump, rsvd0.thread_halted);
+	int stopped = 0;
+
+	igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
+		stopped = 0;
+		fsync(data->vm_fd);
+		for (int i = 0; i < data->thread_count; i++) {
+			if (vm_read_target_u32(data, i * arf_size + halted_off) == 1)
+				stopped++;
+		}
+		if (stopped >= data->thread_count)
+			break;
+		usleep(10000);
+	}
+
+	return stopped;
+}
+
+static void sync_bar_set_resume_all(struct online_debug_data *data)
+{
+	size_t arf_size = sizeof(struct sip_arf_dump);
+	size_t resume_off = offsetof(struct sip_arf_dump, rsvd1.thread_resume);
+
+	for (int i = 0; i < data->thread_count; i++)
+		vm_write_target_u32(data, 1, i * arf_size + resume_off);
+	fsync(data->vm_fd);
+}
+
+static void sync_host_resume_trigger_sync_bar(struct xe_eudebug_debugger *d,
+						  struct drm_xe_eudebug_event *e)
+{
+	struct drm_xe_eudebug_event_sync_host *es = igt_container_of(e, es, base);
+	struct online_debug_data *data = d->data;
+
+	if (data->single_thread_resumed)
+		return;
+
+	pthread_mutex_lock(&data->mutex);
+	/*
+	 * exec_queue_trigger's lrc_handle[0] is invalid on the per-context
+	 * debug path; use the lrc_handle reported by this SYNC_HOST event.
+	 */
+	data->lrc_handle = es->lrc_handle;
+	/*
+	 * Resume exactly one of the halted threads. The resumed thread returns
+	 * to the workload and blocks on the sync.bar instruction, waiting for
+	 * the remaining halted threads.
+	 */
+	igt_debug("interrupt-sync-bar: resuming single thread\n");
+	if (set_resume_on_halted_thread(data))
+		data->single_thread_resumed = true;
+	pthread_mutex_unlock(&data->mutex);
+
+	data->last_eu_control_seqno = eu_ctl_resume(d->master_fd, d->fd, es->client_handle,
+						    es->exec_queue_handle, es->lrc_handle,
+						    NULL, 0);
 }
 
 static void sso_e64_resume_thread(struct online_debug_data *data,
@@ -3355,6 +3442,104 @@ static void test_basic_online_for_e64(int fd, struct drm_xe_engine_class_instanc
 }
 
 /**
+ * SUBTEST: interrupt-sync-bar
+ * Functionality: EU Control
+ * Description:
+ *	Dispatch a thread group of EU threads with a breakpoint set on the
+ *	first instruction. All threads hit the breakpoint. Resume a single
+ *	thread so it blocks on the sync.bar instruction waiting for the rest
+ *	of the group, then issue INTERRUPT_ALL and verify that the thread
+ *	blocked on sync.bar is interruptible, i.e. all threads of the group
+ *	get stopped.
+ */
+static void test_interrupt_sync_bar(int fd, struct drm_xe_engine_class_instance *hwe,
+				    uint64_t flags)
+{
+	struct xe_eudebug_session *s;
+	struct online_debug_data *data;
+	bool resumed = false;
+	int stopped;
+
+	igt_require_f(intel_gen_per_context_eudebug(fd),
+		      "interrupt-sync-bar requires Xe3p or higher.\n");
+
+	data = online_debug_data_create(fd, hwe, flags);
+
+	s = calloc(1, sizeof(*s));
+	igt_assert(s);
+
+	s->client = xe_eudebug_client_create_timeout(fd, run_online_client_for_e64, data,
+						     60 * 5);
+	s->debugger = xe_eudebug_debugger_create(fd, data);
+
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_debug_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_SYNC_HOST,
+					sync_host_resume_trigger_sync_bar);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_OPEN,
+					open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE,
+					exec_queue_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM,
+					vm_open_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_METADATA,
+					create_metadata_trigger);
+	xe_eudebug_debugger_add_trigger(s->debugger, DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE,
+					ufence_ack_trigger);
+
+	igt_assert_eq(xe_eudebug_debugger_attach(s->debugger, s->client), 0);
+	xe_eudebug_debugger_start_worker(s->debugger);
+	xe_eudebug_client_start(s->client);
+
+	wait_for_workload_start(data);
+
+	/*
+	 * Wait until the sync-host trigger has resumed a single thread so it
+	 * returns to the workload and blocks on the sync.bar instruction.
+	 */
+	igt_for_milliseconds(STARTUP_TIMEOUT_MS) {
+		pthread_mutex_lock(&data->mutex);
+		resumed = data->single_thread_resumed;
+		pthread_mutex_unlock(&data->mutex);
+		if (resumed)
+			break;
+		usleep(1000);
+	}
+	igt_assert_f(resumed, "Timeout waiting for a thread to reach sync.bar.\n");
+
+	/* Give the resumed thread time to reach and block on sync.bar. */
+	usleep(WORKLOAD_DELAY_US);
+
+	pthread_mutex_lock(&data->mutex);
+	eu_ctl_interrupt_all(s->debugger->fd, data->client_handle,
+			     data->exec_queue_handle, data->lrc_handle);
+	pthread_mutex_unlock(&data->mutex);
+
+	stopped = sync_bar_wait_threads_halted(data);
+	igt_debug("interrupt-sync-bar: stopped=%d, expected=%d\n", stopped, data->thread_count);
+	igt_assert_eq(stopped, data->thread_count);
+
+	/*
+	 * Set resume on all threads and issue a single resume so they all pass
+	 * the sync.bar together and run to completion.
+	 */
+	sync_bar_set_resume_all(data);
+	eu_ctl_resume(s->debugger->master_fd, s->debugger->fd, data->client_handle,
+		      data->exec_queue_handle, data->lrc_handle, NULL, 0);
+
+	xe_eudebug_client_wait_done(s->client);
+	xe_eudebug_debugger_stop_worker(s->debugger);
+
+	xe_eudebug_event_log_print(s->debugger->log, true);
+	xe_eudebug_event_log_print(s->client->log, true);
+
+	online_session_check(s);
+
+	xe_eudebug_session_destroy(s);
+	online_debug_data_destroy(data);
+}
+
+/**
  * SUBTEST: reset-with-attention
  * Functionality: EUdebug preemption timeout
  * Description:
@@ -4750,6 +4935,9 @@ int igt_main()
 
 	test_gt_render_or_compute("pagefault-atomic-write", fd, hwe)
 		test_basic_online_for_e64(fd, hwe, SHADER_PAGEFAULT_ATOMIC_WRITE);
+
+	test_gt_render_or_compute("interrupt-sync-bar", fd, hwe)
+		test_interrupt_sync_bar(fd, hwe, SHADER_BREAKPOINT_SYNC_BAR);
 
 	test_gt_render_or_compute("pagefault-read-stress", fd, hwe)
 		if (gen < 35)
