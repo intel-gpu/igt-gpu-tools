@@ -91,10 +91,11 @@ EOF
 
 # Compiles assembly to binary representation sent to stdout.
 compile_iga64() {
+    flags=$(grep -oP '(?<=#define IGA64_FLAGS ")[^"]*' <<< "$asm_body") || flags="-Xauto-deps"
     cmd="cpp -P - -o $WD/$asm_name.$gen_name.asm"
     cmd+=" -DGFX_VER=$gfx_ver -D'ARG(n)=$IGA64_ARG0 + n' -imacros $IGT_SRCDIR/lib/iga64_macros.h"
     eval "$cmd" <<<"$asm_body" || die "cpp error for $asm_name.$gen_name\ncmd: $cmd"
-    cmd="iga64 -Xauto-deps -Wall -p=$gen_name"
+    cmd="iga64 $flags -Wall -p=$gen_name"
     cmd+=" $WD/$asm_name.$gen_name.asm"
     [ -n "$SHOW_CMD" ] && warn "$cmd"
     eval "$cmd" || die "iga64 error for $asm_name.$gen_name\ncmd: $cmd"
