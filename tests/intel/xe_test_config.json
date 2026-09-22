@@ -13,7 +13,8 @@
                     "exclude-type": "regex-ignorecase",
                     "append-value-if-not-excluded": "Xe FULL, Xe FULL VF, Xe FULL VM",
                     "include": [
-                        { "Xe BAT, Xe BAT VF, Xe BAT VM": "../intel-ci/xe.fast-feedback.testlist" }
+                        { "Xe BAT, Xe BAT VF, Xe BAT VM": "../intel-ci/xe.fast-feedback.testlist" },
+                        { "Xe premerge gating": "../intel-ci/xe.cri.premerge.testlist" }
                     ],
                     "exclude": [
                         { "Xe BAT, Xe BAT VF, Xe BAT VM, Xe FULL, Xe FULL VF, Xe FULL VM": "../intel-ci/xe.blocklist.txt" },
