@@ -790,6 +790,17 @@ static void emit_shader_pagefault_one_of_many(struct gpgpu_shader *shader, uint3
 	)", pf_thread_number);
 }
 
+static void emit_store_sr0_0(struct gpgpu_shader *shader)
+{
+	emit_iga64_code(shader, store_sr0_0, R"(
+	#if GFX_VER >= 2000
+	mov (1) r5.0<1>:ud sr0.0:ud
+	SET_THREAD_SPACE_ADDR(r4, 0, 0:ud, 4)
+	STORE_SPACE_DW(r4, r5)
+	#endif
+	)");
+}
+
 static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 {
 	struct dim_t w_dim = walker_dimensions(data->thread_count);
@@ -905,13 +916,7 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 		if (!(data->flags & SHADER_PAGEFAULT_ONE_OF_MANY))
 			gpgpu_shader__write_aip(sip, 0);
 		else
-			emit_iga64_code(sip, store_sr0_0, R"(
-#if GFX_VER >= 2000
-	mov (1) r5.0<1>:ud sr0.0:ud
-	SET_THREAD_SPACE_ADDR(r4, 0, 0:ud, 4)
-	STORE_SPACE_DW(r4, r5)
-#endif
-			)");
+			emit_store_sr0_0(sip);
 
 		/*
 		* As gpgpu_shader__store_arf() shader implements its own
