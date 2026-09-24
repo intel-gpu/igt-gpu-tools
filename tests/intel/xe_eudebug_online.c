@@ -1123,7 +1123,7 @@ online_debug_data_create(int drm_fd, struct drm_xe_engine_class_instance *hwe, u
 
 	data = mmap(0, ALIGN(sizeof(*data), PAGE_SIZE),
 		    PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
-	igt_assert(data);
+	igt_assert(data != MAP_FAILED);
 
 	data->drm_fd = drm_fd;
 	memcpy(&data->hwe, hwe, sizeof(*hwe));

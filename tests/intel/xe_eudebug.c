@@ -2140,7 +2140,7 @@ static struct ufence_priv *ufence_priv_create(void)
 
 	priv = mmap(0, ALIGN(sizeof(*priv), PAGE_SIZE),
 		    PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
-	igt_assert(priv);
+	igt_assert(priv != MAP_FAILED);
 	memset(priv, 0, sizeof(*priv));
 
 	pthread_mutexattr_init(&attr);
@@ -2342,7 +2342,7 @@ static struct vm_bind_clear_priv *vm_bind_clear_priv_create(void)
 
 	priv = mmap(0, ALIGN(sizeof(*priv), PAGE_SIZE),
 		    PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
-	igt_assert(priv);
+	igt_assert(priv != MAP_FAILED);
 	memset(priv, 0, sizeof(*priv));
 
 	return priv;
