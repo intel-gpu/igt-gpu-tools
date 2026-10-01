@@ -23,6 +23,7 @@ igt@xe_peer2peer@.*
 # Valid skip: No render engine support on CRI
 ##################################################################
 igt@.*render.*
+igt@xe_oa@unprivileged-single-ctx-counters
 ##################################################################
 # Valid skip: PAT index tests targeting older/different platforms
 ##################################################################
