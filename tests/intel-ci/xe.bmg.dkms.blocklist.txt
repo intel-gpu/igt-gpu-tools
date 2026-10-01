@@ -3,7 +3,8 @@
 #CONFIG_FAULT_INJECTION configuration is not enabled in the production
 #kernel cofiguration.
 ######################################################################
-igt@xe_fault_injection@*
+igt@.*fault[_-]injection.*
 igt@xe_survivability@runtime-survivability
 igt@xe_wedged@basic-wedged
+igt@xe_mempage_offline@inject.*
 ##################################################################
