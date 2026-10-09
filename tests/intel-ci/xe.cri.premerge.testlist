@@ -36,6 +36,9 @@ igt@xe_exec_balancer@twice-virtual-rebind
 igt@xe_exec_balancer@twice-virtual-userptr
 igt@xe_exec_balancer@twice-virtual-userptr-invalidate
 igt@xe_exec_balancer@twice-virtual-userptr-rebind
+igt@xe_evict@evict-beng-small-external-cm
+igt@xe_evict@evict-small
+igt@xe_evict@evict-small-cm
 igt@xe_exec_basic@no-exec-basic
 igt@xe_exec_basic@no-exec-bindexecqueue
 igt@xe_exec_basic@no-exec-userptr-invalidate
