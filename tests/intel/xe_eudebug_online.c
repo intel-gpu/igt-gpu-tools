@@ -947,15 +947,6 @@ static int eu_attentions_xor_count(const uint32_t *a, const uint32_t *b, uint32_
 	return count;
 }
 
-static bool eu_attention_bitmask_is_subset(const uint8_t *sub, const uint8_t *super, int size)
-{
-	for (int i = 0; i < size; i++)
-		if (sub[i] & ~super[i])
-			return false;
-
-	return true;
-}
-
 static int count_canaries_eq(uint32_t *ptr, struct dim_t w_dim, uint32_t value)
 {
 	int count = 0;
@@ -2688,12 +2679,11 @@ static void online_session_check(struct xe_eudebug_session *s)
 {
 	struct drm_xe_eudebug_event_eu_attention *ea = NULL;
 	struct drm_xe_eudebug_event_pagefault *pf = NULL;
-	struct drm_xe_eudebug_event_eu_attention *prev_ea = NULL;
 	struct drm_xe_eudebug_event *event = NULL;
 	struct online_debug_data *data = s->client->ptr;
 	uint64_t flags = data->flags;
 	bool expect_exception = flags & (DISABLE_EXCEPTIONS | DISABLE_DEBUG_MODE) ? false : true;
-	int sum = 0;
+	bool exception_raised = false;
 	int bitmask_size;
 	int pagefault_threads = 0;
 
@@ -2702,8 +2692,6 @@ static void online_session_check(struct xe_eudebug_session *s)
 					  XE_EUDEBUG_FILTER_EVENT_VM_BIND_UFENCE);
 
 	if (intel_gen_per_context_eudebug(s->debugger->master_fd)) {
-		bool exception_raised = false;
-
 		xe_eudebug_for_each_event(event, s->debugger->log)
 			if (event->type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST) {
 				exception_raised = true;
@@ -2722,19 +2710,7 @@ static void online_session_check(struct xe_eudebug_session *s)
 			igt_assert(event->flags == DRM_XE_EUDEBUG_EVENT_STATE_CHANGE);
 			igt_assert_eq(ea->bitmask_size, bitmask_size);
 			igt_assert(match_attention_with_exec_queue(s->debugger->log, ea));
-
-			/*
-			 * Attention is level-triggered: if this event is a
-			 * superset of the previous one, count only the newly
-			 * stopped threads; otherwise count them all.
-			 */
-			if (prev_ea && eu_attention_bitmask_is_subset(prev_ea->bitmask, ea->bitmask, bitmask_size))
-				sum += eu_attentions_xor_count((uint32_t *)ea->bitmask,
-							       (uint32_t *)prev_ea->bitmask, bitmask_size);
-			else
-				sum += igt_bitmap_hweight(ea->bitmask, bitmask_size * 8);
-
-			prev_ea = ea;
+			exception_raised = true;
 		} else if (event->type == DRM_XE_EUDEBUG_EVENT_PAGEFAULT) {
 			uint32_t after_offset = bitmask_size / sizeof(uint32_t);
 			uint32_t resolved_offset = bitmask_size / sizeof(uint32_t) * 2;
@@ -2754,12 +2730,9 @@ static void online_session_check(struct xe_eudebug_session *s)
 	 * if we have a breakpoint set and we resume all threads always.
 	 */
 	if (flags == SHADER_BREAKPOINT || flags == TRIGGER_UFENCE_SET_BREAKPOINT)
-		igt_assert_eq(sum, data->thread_hit_count);
+		igt_assert_eq(data->thread_count, data->thread_hit_count);
 
-	if (expect_exception)
-		igt_assert(sum > 0);
-	else
-		igt_assert(sum == 0);
+	igt_assert_eq(expect_exception, exception_raised);
 
 	if (flags & SHADER_PAGEFAULT)
 		igt_assert(pagefault_threads > 0);
