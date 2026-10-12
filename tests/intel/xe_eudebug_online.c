@@ -1481,14 +1481,67 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
 	free(bitmask);
 }
 
+/*
+ * Read, log, and skip all queued sync-host events.
+ *
+ * Intended to be called from within a sync-host trigger to
+ * drain queued sync-host events which may be generated
+ * in abundance.
+ * With this the debugger_worker_loop will see a single
+ * sync-host event and will call a single trigger for that.
+ * However all sync-host event will be logged in event's log.
+ */
+#define MAX_EVENT_SIZE (32 * 1024)
+static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
+{
+	struct drm_xe_eudebug_event_sync_host e = {};
+	struct pollfd p = { .events = POLLIN };
+	int ret;
+
+	p.fd = d->fd;
+	do {
+		/* No timeout, checking for queued data */
+		ret = poll(&p, 1, 0);
+
+		if (ret == -1) {
+			igt_info("%s(): poll failed with errno %d\n",
+				 __func__, errno);
+			break;
+		}
+
+		/* Timeout - no more sync-host queued */
+		if (!ret)
+			break;
+
+		if (ret == 1 && (p.revents & POLLIN)) {
+			e.base.type = DRM_XE_EUDEBUG_EVENT_READ;
+			e.base.flags = 0;
+			e.base.len = sizeof(e);
+
+			/*
+			 * While flood of SYNC_HOST event is expected
+			 * there could be a case where other events
+			 * may started to come to.
+			 * In all error cases simply exit. This is recoverable.
+			 */
+			if (ioctl(d->fd,
+				  DRM_XE_EUDEBUG_IOCTL_READ_EVENT,
+				  &e.base))
+				break;
+
+			++d->event_count;
+			xe_eudebug_event_log_write(d->log, &e.base);
+			/* The test is screwed already. Will fail */
+			igt_assert(e.base.type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
+		}
+	} while(1);
+}
+
 static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
 				     struct drm_xe_eudebug_event *e)
 {
 	struct drm_xe_eudebug_event_sync_host *es = (void *) e;
 	struct online_debug_data *data = d->ptr;
-
-	if (data->last_eu_control_seqno > es->base.seqno)
-		return;
 
 	pthread_mutex_lock(&data->mutex);
 	igt_gettime(&data->exception_arrived);
@@ -1505,6 +1558,7 @@ static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
 	 * breakpoint has been queued before calling eu control.
 	 */
 	sleep(1);
+	read_queued_sync_host_events(d);
 
 	/* workload was stopped by interrupt all */
 	if (d->flags & SHADER_LOOP) {
@@ -1635,62 +1689,6 @@ static void eu_attention_resume_single_step_trigger(struct xe_eudebug_debugger *
 	if (data->single_step_bitmask)
 		for (int i = 0; i < att->bitmask_size; i++)
 			data->single_step_bitmask[i] &= ~att->bitmask[i];
-}
-
-/*
- * Read, log, and skip all queued sync-host events.
- *
- * Intended to be called from within a sync-host trigger to
- * drain queued sync-host events which may be generated
- * in abundance.
- * With this the debugger_worker_loop will see a single
- * sync-host event and will call a single trigger for that.
- * However all sync-host event will be logged in event's log.
- */
-#define MAX_EVENT_SIZE (32 * 1024)
-static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
-{
-	struct drm_xe_eudebug_event_sync_host e = {};
-	struct pollfd p = { .events = POLLIN };
-	int ret;
-
-	p.fd = d->fd;
-	do {
-		/* No timeout, checking for queued data */
-		ret = poll(&p, 1, 0);
-
-		if (ret == -1) {
-			igt_info("%s(): poll failed with errno %d\n",
-				 __func__, errno);
-			break;
-		}
-
-		/* Timeout - no more sync-host queued */
-		if (!ret)
-			break;
-
-		if (ret == 1 && (p.revents & POLLIN)) {
-			e.base.type = DRM_XE_EUDEBUG_EVENT_READ;
-			e.base.flags = 0;
-			e.base.len = sizeof(e);
-
-			/*
-			 * While flood of SYNC_HOST event is expected
-			 * there could be a case where other events
-			 * may started to come to.
-			 * In all error cases simply exit. This is recoverable.
-			 */
-			if (ioctl(d->fd,
-				  DRM_XE_EUDEBUG_IOCTL_READ_EVENT,
-				  &e.base))
-				break;
-
-			++d->event_count;
-			xe_eudebug_event_log_write(d->log, &e.base);
-			/* The test is screwed already. Will fail */
-			igt_assert(e.base.type == DRM_XE_EUDEBUG_EVENT_SYNC_HOST);
-		}
-	} while(1);
 }
 
 static void sync_host_resume_single_step_trigger(struct xe_eudebug_debugger *d,
