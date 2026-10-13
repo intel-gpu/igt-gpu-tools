@@ -20,7 +20,9 @@
 #include "xe/xe_query.h"
 #include "xe/xe_spin.h"
 #include <string.h>
+
 #define USER_FENCE_VALUE 0xdeadbeefdeadbeefull
+#define OVERCOMMIT_BO_SIZE SZ_64M
 
 enum overcommit_stage {
 	EXPECT_NONE,
@@ -2385,10 +2387,10 @@ static void invalid_vm_id(int fd)
 }
 
 static enum overcommit_stage create_data_bos(int fd, uint32_t vm, uint32_t *bos, int num_bos,
-					     uint64_t nf_bo_size, bool use_vram, uint64_t data_addr,
-					     uint32_t bo_flags, int gt_id, int *num_bound_out)
+					     uint64_t data_addr, uint32_t bo_flags, int gt_id,
+					     int *num_bound_out)
 {
-	uint32_t placement = use_vram ? vram_memory(fd, gt_id) : system_memory(fd);
+	uint32_t placement = vram_memory(fd, gt_id);
 
 	*num_bound_out = 0;
 
@@ -2397,7 +2399,7 @@ static enum overcommit_stage create_data_bos(int fd, uint32_t vm, uint32_t *bos,
 		int create_ret = 0;
 
 		/* Create BO using the case's create function */
-		create_ret = __xe_bo_create(fd, vm, nf_bo_size, placement,
+		create_ret = __xe_bo_create(fd, vm, OVERCOMMIT_BO_SIZE, placement,
 					    bo_flags, NULL, &bos[i]);
 
 		if (create_ret) {
@@ -2411,7 +2413,8 @@ static enum overcommit_stage create_data_bos(int fd, uint32_t vm, uint32_t *bos,
 		}
 
 		bind_err = __xe_vm_bind_lr_sync(fd, vm, bos[i], 0, data_addr +
-						((uint64_t)i * nf_bo_size), nf_bo_size, 0);
+						((uint64_t)i * OVERCOMMIT_BO_SIZE),
+						OVERCOMMIT_BO_SIZE, 0);
 		if (bind_err) {
 			if (errno == ENOMEM || errno == ENOSPC) {
 				igt_debug("BO bind failed at %d/%d - error %d (%s), %d BOs bound\n",
@@ -2425,21 +2428,21 @@ static enum overcommit_stage create_data_bos(int fd, uint32_t vm, uint32_t *bos,
 		*num_bound_out = i + 1;
 		igt_debug("Created and bound BO %d/%d at 0x%llx\n",
 			  i + 1, num_bos,
-			  (unsigned long long)(data_addr + ((uint64_t)i * nf_bo_size)));
+			  (unsigned long long)(data_addr + ((uint64_t)i * OVERCOMMIT_BO_SIZE)));
 	}
 	return EXPECT_NONE;
 }
 
-static void verify_bo(int fd, uint32_t *bos, int num_bos, uint64_t nf_bo_size, uint64_t stride)
+static void verify_bo(int fd, uint32_t *bos, int num_bos, uint64_t stride)
 {
 	for (int i = 0; i < num_bos; i++) {
 		uint32_t *verify_data;
 		int errors = 0;
 
-		verify_data = xe_bo_map(fd, bos[i], nf_bo_size);
+		verify_data = xe_bo_map(fd, bos[i], OVERCOMMIT_BO_SIZE);
 		igt_assert(verify_data);
 
-		for (int off = 0; off < nf_bo_size; off += stride) {
+		for (int off = 0; off < OVERCOMMIT_BO_SIZE; off += stride) {
 			uint32_t expected = 0xBB;
 			uint32_t actual = *(uint32_t *)((char *)verify_data + off);
 
@@ -2451,7 +2454,7 @@ static void verify_bo(int fd, uint32_t *bos, int num_bos, uint64_t nf_bo_size, u
 			}
 		}
 
-		munmap(verify_data, nf_bo_size);
+		munmap(verify_data, OVERCOMMIT_BO_SIZE);
 		igt_assert_f(errors == 0, "Data verification failed for BO %d with %d errors\n",
 			     i, errors);
 	}
@@ -2497,7 +2500,6 @@ struct vm_overcommit_case {
 	const char *name;
 	uint32_t vm_flags;
 	uint32_t bo_flags;
-	bool use_vram;
 	uint64_t data_addr;
 	int overcommit_mult;
 	enum overcommit_stage expected_stage;
@@ -2510,7 +2512,6 @@ static const struct vm_overcommit_case overcommit_cases[] = {
 		.vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE,
 		.bo_flags = DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING |
 			    DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM,
-		.use_vram = true,
 		.data_addr = 0x1a0000,
 		.overcommit_mult = 2,
 		.expected_stage = EXPECT_BIND,
@@ -2520,7 +2521,6 @@ static const struct vm_overcommit_case overcommit_cases[] = {
 		.name = "vram-lr-external-nodefer",
 		.vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE,
 		.bo_flags = DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM,
-		.use_vram = true,
 		.data_addr = 0x1a0000,
 		.overcommit_mult = 2,
 		.expected_stage = EXPECT_BIND,
@@ -2531,7 +2531,6 @@ static const struct vm_overcommit_case overcommit_cases[] = {
 		.vm_flags = DRM_XE_VM_CREATE_FLAG_LR_MODE |
 			    DRM_XE_VM_CREATE_FLAG_FAULT_MODE,
 		.bo_flags = DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM,
-		.use_vram = true,
 		.data_addr = 0x300000000,
 		.overcommit_mult = 2,
 		.expected_stage = EXPECT_NONE,
@@ -2541,7 +2540,6 @@ static const struct vm_overcommit_case overcommit_cases[] = {
 		.name = "vram-no-lr",
 		.vm_flags = 0,
 		.bo_flags = DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM,
-		.use_vram = true,
 		.data_addr = 0x300000000,
 		.overcommit_mult = 2,
 		.expected_stage = EXPECT_EXEC,
@@ -2553,7 +2551,6 @@ static const struct vm_overcommit_case overcommit_cases[] = {
 			    DRM_XE_VM_CREATE_FLAG_FAULT_MODE,
 		.bo_flags = DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING |
 			    DRM_XE_GEM_CREATE_FLAG_NEEDS_VISIBLE_VRAM,
-		.use_vram = true,
 		.data_addr = 0x300000000,
 		.overcommit_mult = 2,
 		/*
@@ -2568,17 +2565,16 @@ static const struct vm_overcommit_case overcommit_cases[] = {
 
 static void
 test_vm_overcommit(int fd, struct drm_xe_engine_class_instance *eci,
-		   const struct vm_overcommit_case *c,
-		   uint64_t system_size, uint64_t vram_size)
+		   const struct vm_overcommit_case *c, int num_bos)
 {
 	uint32_t vm = 0, *bos, batch_bo = 0, exec_queue = 0, bind_exec_queue = 0;
 	uint64_t sync_addr = 0x1000000000, batch_addr = 0x200000000;
-	int i, num_bos, num_bound = 0, bind_err, create_ret, wait_ret;
-	size_t sync_size, nf_bo_size = 64 * 1024 * 1024;
+	int i, num_bound = 0, bind_err, create_ret, wait_ret;
 	enum overcommit_stage actual_stage = EXPECT_NONE;
-	uint64_t stride = 1024 * 1024, base_size;
-	uint64_t overcommit_size, off, data_addr;
+	uint64_t off, data_addr;
 	int64_t timeout = 20 * NSEC_PER_SEC;
+	uint64_t stride = SZ_1M;
+	size_t sync_size;
 	struct drm_xe_sync bind_sync[1] = {
 		{
 			.type = DRM_XE_SYNC_TYPE_USER_FENCE,
@@ -2607,18 +2603,10 @@ test_vm_overcommit(int fd, struct drm_xe_engine_class_instance *eci,
 	uint64_t *user_fence_sync = NULL;
 
 	data_addr = c->data_addr;
-	base_size = c->use_vram ? vram_size : system_size;
-	overcommit_size = ALIGN((uint64_t)(base_size * c->overcommit_mult), 4096);
 
-	num_bos = (overcommit_size / nf_bo_size) + 1;
 	bos = calloc(num_bos, sizeof(*bos));
 	igt_assert(bos);
 
-	igt_debug("Overcommit test: allocating %d BOs of %llu MB each",
-		  num_bos, (unsigned long long)(nf_bo_size >> 20));
-	igt_debug("total=%llu MB, vram=%llu MB\n",
-		  (unsigned long long)(num_bos * nf_bo_size >> 20),
-		  (unsigned long long)(vram_size >> 20));
 	/* Create VM with appropriate flags */
 	vm = xe_vm_create(fd, c->vm_flags, 0);
 	igt_assert(vm);
@@ -2632,8 +2620,10 @@ test_vm_overcommit(int fd, struct drm_xe_engine_class_instance *eci,
 	exec_sync->addr = to_user_pointer(&user_fence_sync[0]);
 
 	/* Create and bind data BOs */
-	actual_stage = create_data_bos(fd, vm, bos, num_bos, nf_bo_size, c->use_vram, data_addr,
+	actual_stage = create_data_bos(fd, vm, bos, num_bos, data_addr,
 				       c->bo_flags, eci->gt_id, &num_bound);
+	igt_debug("Overcommit BO creation: case=%s actual_stage=%d num_bound=%d/%d\n",
+		  c->name, actual_stage, num_bound, num_bos);
 	/*
 	 * On EXPECT_CREATE nothing was bound so bail out entirely.
 	 * On EXPECT_BIND with no BOs bound there is nothing to execute either.
@@ -2680,8 +2670,8 @@ test_vm_overcommit(int fd, struct drm_xe_engine_class_instance *eci,
 		igt_debug("Writing to BO %d/%d via GPU\n", i + 1, num_bos);
 		timeout = 20 * NSEC_PER_SEC;
 
-		for (off = 0; off < nf_bo_size; off += stride) {
-			uint64_t target_addr = data_addr + ((uint64_t)i * nf_bo_size) + off;
+		for (off = 0; off < OVERCOMMIT_BO_SIZE; off += stride) {
+			uint64_t target_addr = data_addr + ((uint64_t)i * OVERCOMMIT_BO_SIZE) + off;
 			int b_idx = 0;
 
 			batch_data->batch[b_idx++] = MI_STORE_DWORD_IMM_GEN4;
@@ -2725,7 +2715,7 @@ test_vm_overcommit(int fd, struct drm_xe_engine_class_instance *eci,
 
 	/* Verify GPU writes for bound BOs */
 	if (actual_stage == EXPECT_NONE || (actual_stage == EXPECT_BIND && num_bound > 0))
-		verify_bo(fd, bos, num_bound, nf_bo_size, stride);
+		verify_bo(fd, bos, num_bound, stride);
 
 check_and_cleanup:
 	igt_assert_f(actual_stage == c->expected_stage, "Expected overcommit at stage %d, got %d\n",
@@ -3499,10 +3489,37 @@ int igt_main()
 		const char *mode = (c->vm_flags & DRM_XE_VM_CREATE_FLAG_FAULT_MODE) ?
 					"fault" : "nonfault";
 		igt_subtest_f("overcommit-%s-%s", mode, c->name) {
-			igt_require(xe_has_vram(fd));
-			igt_require(xe_visible_vram_size(fd, 0));
-			test_vm_overcommit(fd, hwe_non_copy, c, (igt_get_avail_ram_mb() << 20),
-					   xe_visible_vram_size(fd, 0));
+			uint64_t vram_size, vram_mb, avail_ram_mb, ram_mb, required_mb;
+			uint64_t overcommit_size, total_bo_size;
+			int num_bos;
+
+			vram_size = xe_visible_vram_size(fd, 0);
+			igt_require(vram_size);
+			vram_mb = vram_size >> 20;
+			avail_ram_mb = igt_get_avail_ram_mb();
+			ram_mb = igt_get_total_ram_mb();
+
+			overcommit_size = ALIGN(vram_size * c->overcommit_mult, 4096);
+			num_bos = overcommit_size / OVERCOMMIT_BO_SIZE + 1;
+			total_bo_size = (uint64_t)num_bos * OVERCOMMIT_BO_SIZE;
+
+			igt_assert_lt_u64(vram_size, total_bo_size);
+
+			igt_debug("Overcommit %s-%s: mult=%d ram=%" PRIu64 "MiB\n",
+				  mode, c->name, c->overcommit_mult, ram_mb);
+			igt_debug("Overcommit avail_ram=%" PRIu64 "MiB vram=%" PRIu64 "MiB\n",
+				  avail_ram_mb, vram_mb);
+			igt_debug("Overcommit size=%" PRIu64 "MiB num_bos=%d\n",
+				  overcommit_size >> 20, num_bos);
+			igt_debug("Overcommit bo_size=%dMiB total=%" PRIu64 "MiB\n",
+				  OVERCOMMIT_BO_SIZE >> 20, total_bo_size >> 20);
+
+			required_mb = ALIGN(DIV_ROUND_UP(total_bo_size - vram_size,
+							 SZ_1M), 64) + 64;
+			igt_require_f(required_mb <= avail_ram_mb * 50 / 100,
+				      "Need %" PRIu64 "MiB, > 50%% of avail RAM %" PRIu64 "MiB\n",
+				      required_mb, avail_ram_mb);
+			test_vm_overcommit(fd, hwe_non_copy, c, num_bos);
 		}
 	}
 
