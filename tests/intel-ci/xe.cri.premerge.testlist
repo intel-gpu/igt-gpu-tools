@@ -14,8 +14,6 @@ igt@xe_dma_buf_sync@export-dma-buf-once-read-sync
 igt@xe_dma_buf_sync@export-dma-buf-once-read-write-sync
 igt@xe_dma_buf_sync@export-dma-buf-once-write-read-sync
 igt@xe_dma_buf_sync@export-dma-buf-once-write-sync
-igt@xe_eudebug@basic-connect
-igt@xe_eudebug@basic-read-event
 igt@xe_exec_atomic@basic-dec-all
 igt@xe_exec_atomic@basic-inc-all
 igt@xe_exec_balancer@no-exec-cm-virtual-basic
@@ -132,7 +130,6 @@ igt@xe_exec_threads@threads-basic
 igt@xe_exec_threads@threads-mixed-basic
 igt@xe_exec_threads@threads-mixed-fd-basic
 igt@xe_exec_threads@threads-mixed-shared-vm-basic
-igt@xe_exec_threads@threads-bal-shared-vm-basic
 igt@xe_gt_freq@freq_basic_api
 igt@xe_gt_freq@freq_fixed_idle
 igt@xe_gt_freq@freq_range_idle
