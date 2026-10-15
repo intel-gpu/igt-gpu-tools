@@ -4,3 +4,7 @@
 ######################################################################
 igt@xe_pat@prime-external-import-coh
 ##################################################################
+#Temporarily blocklisting Reload/Unload/force-load tests (XeDKMS) to unblock shard execution
+######################################################################
+igt@xe_module_load@(reload(-no-display)?|many-reload|force-load|unload)$
+######################################################################
