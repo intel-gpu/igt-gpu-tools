@@ -64,8 +64,13 @@ enum cs_opcode {
 	CS_OPCODE_MOVE48 = 1,
 	CS_OPCODE_MOVE32 = 2,
 	CS_OPCODE_WAIT = 3,
+	CS_OPCODE_RUN_COMPUTE = 4,
 	CS_OPCODE_STM = 21,
+	CS_OPCODE_SET_SB_ENTRY = 23,
+	CS_OPCODE_CALL = 32,
+	CS_OPCODE_REQ_RESOURCE = 34,
 	CS_OPCODE_FLUSH_CACHE = 36,
+	CS_OPCODE_ERROR_BARRIER = 47,
 };
 
 enum cs_flush_mode {
@@ -73,6 +78,12 @@ enum cs_flush_mode {
 	CS_FLUSH_MODE_CLEAN = 1,
 	CS_FLUSH_MODE_INVALIDATE = 2,
 	CS_FLUSH_MODE_CLEAN_AND_INVALIDATE = 3,
+};
+
+enum cs_task_axis {
+	CS_TASK_AXIS_X = 0,
+	CS_TASK_AXIS_Y = 1,
+	CS_TASK_AXIS_Z = 2,
 };
 
 /* There's no plan to support big endian in the UMD, so keep
@@ -109,6 +120,19 @@ struct cs_instr {
 			uint64_t opcode: 8;
 		} wait;
 		struct {
+			uint64_t task_increment: 14;
+			uint64_t task_axis: 2;
+			uint64_t unused0: 16;
+			uint64_t progress: 1;
+			uint64_t unused1: 7;
+			uint64_t srt_entry: 2;
+			uint64_t spd_entry: 2;
+			uint64_t tsd_entry: 2;
+			uint64_t fau_entry: 2;
+			uint64_t unused2: 8;
+			uint64_t opcode: 8;
+		} run_compute;
+		struct {
 			uint64_t offset: 16;
 			uint64_t mask: 16;
 			uint64_t unused: 8;
@@ -116,6 +140,27 @@ struct cs_instr {
 			uint64_t src: 8;
 			uint64_t opcode: 8;
 		} stm;
+		struct {
+			uint64_t ep_entry: 4;
+			uint64_t other_entry: 4;
+			uint64_t unused: 48;
+			uint64_t opcode: 8;
+		} set_sb_entry;
+		struct {
+			uint64_t unused0: 32;
+			uint64_t len: 8;
+			uint64_t addr: 8;
+			uint64_t unused1: 8;
+			uint64_t opcode: 8;
+		} call;
+		struct {
+			uint64_t compute: 1;
+			uint64_t fragment: 1;
+			uint64_t tiler: 1;
+			uint64_t idvs: 1;
+			uint64_t unused: 52;
+			uint64_t opcode: 8;
+		} req_resource;
 		struct {
 			uint64_t l2_mode: 4;
 			uint64_t lsc_mode: 4;
@@ -128,6 +173,10 @@ struct cs_instr {
 			uint64_t unused2: 4;
 			uint64_t opcode: 8;
 		} flush;
+		struct {
+			uint64_t unused: 56;
+			uint64_t opcode: 8;
+		} error_barrier;
 		uint64_t raw;
 	};
 };
@@ -187,6 +236,27 @@ cs_wait(uint16_t wait_mask, bool progress_inc)
 }
 
 static inline uint64_t
+cs_run_compute(uint16_t task_increment, enum cs_task_axis task_axis, bool progress,
+	       uint32_t srt_entry, uint32_t spd_entry, uint32_t tsd_entry,
+	       uint32_t fau_entry)
+{
+	struct cs_instr instr = {
+		.run_compute = {
+			.task_increment = task_increment,
+			.task_axis = task_axis,
+			.progress = progress,
+			.srt_entry = srt_entry,
+			.spd_entry = spd_entry,
+			.tsd_entry = tsd_entry,
+			.fau_entry = fau_entry,
+			.opcode = CS_OPCODE_RUN_COMPUTE,
+		},
+	};
+
+	return instr.raw;
+}
+
+static inline uint64_t
 cs_stm(uint8_t address, uint8_t src, uint16_t mask, int16_t offset)
 {
 	struct cs_instr instr = {
@@ -215,6 +285,50 @@ cs_stm64(uint8_t address, uint8_t src, int16_t offset)
 }
 
 static inline uint64_t
+cs_set_sb_entry(uint32_t ep_entry, uint32_t other_entry)
+{
+	struct cs_instr instr = {
+		.set_sb_entry = {
+			.ep_entry = ep_entry,
+			.other_entry = other_entry,
+			.opcode = CS_OPCODE_SET_SB_ENTRY,
+		},
+	};
+
+	return instr.raw;
+}
+
+static inline uint64_t
+cs_call(uint8_t addr, uint8_t len)
+{
+	struct cs_instr instr = {
+		.call = {
+			.addr = addr,
+			.len = len,
+			.opcode = CS_OPCODE_CALL,
+		},
+	};
+
+	return instr.raw;
+}
+
+static inline uint64_t
+cs_req_resource(bool compute, bool fragment, bool tiler, bool idvs)
+{
+	struct cs_instr instr = {
+		.req_resource = {
+			.compute = compute,
+			.fragment = fragment,
+			.tiler = tiler,
+			.idvs = idvs,
+			.opcode = CS_OPCODE_REQ_RESOURCE,
+		},
+	};
+
+	return instr.raw;
+}
+
+static inline uint64_t
 cs_flush(enum cs_flush_mode l2_mode,
 	 enum cs_flush_mode lsc_mode,
 	 enum cs_flush_mode other_mode,
@@ -231,6 +345,18 @@ cs_flush(enum cs_flush_mode l2_mode,
 			.flush_id = flush_id,
 			.signal_slot = signal_slot,
 			.opcode = CS_OPCODE_FLUSH_CACHE,
+		},
+	};
+
+	return instr.raw;
+}
+
+static inline uint64_t
+cs_error_barrier(void)
+{
+	struct cs_instr instr = {
+		.error_barrier = {
+			.opcode = CS_OPCODE_ERROR_BARRIER,
 		},
 	};
 
