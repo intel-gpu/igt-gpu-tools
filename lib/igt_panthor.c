@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2025 Collabora Ltd.
 
 #include "drmtest.h"
+#include "igt_aux.h"
 #include "igt_panthor.h"
 #include "ioctl_wrappers.h"
 #include "panthor_drm.h"
@@ -70,22 +71,6 @@ void igt_panthor_group_submit(int fd, struct drm_panthor_group_submit *group_sub
 }
 
 /**
- * igt_panthor_get_first_core:
- * @cores_present: bitmask of available cores
- *
- * Get a mask with only the first available core bit set.
- *
- * Returns: core mask with first available core, or 0 if no cores available
- */
-uint64_t igt_panthor_get_first_core(uint64_t cores_present)
-{
-	if (cores_present == 0)
-		return 0;
-
-	return 1ULL << (ffs(cores_present) - 1);
-}
-
-/**
  * igt_panthor_group_create_simple:
  * @fd: device file descriptor
  * @vm_id: VM ID to associate with the group
@@ -109,13 +94,13 @@ uint32_t igt_panthor_group_create_simple(int fd, uint32_t vm_id, int err)
 	queues = (struct drm_panthor_obj_array)DRM_PANTHOR_OBJ_ARRAY(1, &queue);
 
 	group_create.queues = queues;
-	group_create.max_compute_cores = 1;
-	group_create.max_fragment_cores = 1;
-	group_create.max_tiler_cores = 1;
+	group_create.max_compute_cores = igt_hweight(gpu_info.shader_present);
+	group_create.max_fragment_cores = igt_hweight(gpu_info.shader_present);
+	group_create.max_tiler_cores = igt_hweight(gpu_info.tiler_present);
 	group_create.priority = PANTHOR_GROUP_PRIORITY_MEDIUM;
-	group_create.compute_core_mask = igt_panthor_get_first_core(gpu_info.shader_present);
-	group_create.fragment_core_mask = igt_panthor_get_first_core(gpu_info.shader_present);
-	group_create.tiler_core_mask = igt_panthor_get_first_core(gpu_info.tiler_present);
+	group_create.compute_core_mask = gpu_info.shader_present;
+	group_create.fragment_core_mask = gpu_info.shader_present;
+	group_create.tiler_core_mask = gpu_info.tiler_present;
 	group_create.vm_id = vm_id;
 
 	igt_panthor_group_create(fd, &group_create, err);
