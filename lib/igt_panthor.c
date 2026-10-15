@@ -374,3 +374,20 @@ void igt_panthor_free_bo(int fd, struct panthor_bo *bo)
 
 	gem_close(fd, bo->handle);
 }
+
+/**
+ * igt_panthor_get_arch:
+ * @fd: panthor device file descriptor
+ *
+ * Get the architecture major version for this device.
+ *
+ * Returns: The Mali architecture major version
+ */
+int igt_panthor_get_arch(int fd)
+{
+	struct drm_panthor_gpu_info gpu_info = { 0 };
+
+	igt_panthor_query(fd, DRM_PANTHOR_DEV_QUERY_GPU_INFO,
+			  &gpu_info, sizeof(gpu_info), 0);
+	return DRM_PANTHOR_ARCH_MAJOR(gpu_info.gpu_id);
+}

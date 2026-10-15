@@ -36,6 +36,7 @@ void igt_panthor_group_submit_simple(int fd, uint32_t group_handle,
 				     uint32_t queue_index, uint64_t stream_addr,
 				     uint32_t stream_size, uint32_t syncobj_handle,
 				     int err);
+int igt_panthor_get_arch(int fd);
 
 static inline void igt_panthor_vm_bind(int fd, uint32_t vm_id, uint32_t bo_handle,
 				       uint64_t va, uint64_t size, uint32_t flags, int err)
