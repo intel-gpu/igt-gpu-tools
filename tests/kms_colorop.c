@@ -287,7 +287,7 @@ static void colorop_plane_test(igt_display_t *display,
 
 	/* reset color pipeline*/
 
-	set_color_pipeline_bypass(plane);
+	igt_plane_set_color_pipeline(plane, NULL);
 
 	/* Commit */
 	igt_plane_set_fb(plane, input_fb);
@@ -315,7 +315,7 @@ static void colorop_plane_test(igt_display_t *display,
 
 	if (!colorops[0]) {
 		/* bypass test */
-		set_color_pipeline_bypass(plane);
+		igt_plane_set_color_pipeline(plane, NULL);
 	} else {
 		/* get COLOR_PIPELINE enum */
 		color_pipeline = get_color_pipeline(display, plane, colorops);
@@ -343,7 +343,7 @@ static void colorop_plane_test(igt_display_t *display,
 	/* Test bypass transition if requested */
 	if (verify_bypass) {
 		/* reset color pipeline*/
-		set_color_pipeline_bypass(plane);
+		igt_plane_set_color_pipeline(plane, NULL);
 
 		/* Commit */
 		igt_plane_set_fb(plane, input_fb);

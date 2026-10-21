@@ -203,7 +203,7 @@ static void _test_plane_colorops(data_t *data,
 	chamelium_destroy_frame_dump(frame);
 
 	/* Cleanup before assert so failed plane doesn't affect next plane */
-	set_color_pipeline_bypass(plane);
+	igt_plane_set_color_pipeline(plane, NULL);
 	reset_colorops(colorops);
 	igt_plane_set_fb(plane, NULL);
 	igt_display_commit_atomic(&data->display, 0, NULL);

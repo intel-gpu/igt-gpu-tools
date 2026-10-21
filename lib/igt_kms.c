@@ -2712,7 +2712,7 @@ static void igt_plane_reset(igt_plane_t *plane)
 		igt_plane_set_prop_value(plane, IGT_PLANE_HOTSPOT_Y, 0);
 
 	if (igt_plane_has_prop(plane, IGT_PLANE_COLOR_PIPELINE))
-		igt_plane_set_prop_enum(plane, IGT_PLANE_COLOR_PIPELINE, "Bypass");
+		igt_plane_set_color_pipeline(plane, NULL);
 
 	igt_plane_clear_prop_changed(plane, IGT_PLANE_IN_FENCE_FD);
 	plane->values[IGT_PLANE_IN_FENCE_FD] = ~0ULL;
@@ -4438,17 +4438,25 @@ bool igt_plane_is_valid_colorop(igt_plane_t *plane, igt_colorop_t *colorop)
 /**
  * igt_plane_set_color_pipeline:
  * @plane: Target plane.
- * @colorop: Colorop to set as color pipeline.
+ * @colorop: Colorop to set as color pipeline, or NULL for "Bypass".
  *
  * This function sets the given @colorop as color pipeline on @plane, or fails
- * the test if it's an invalid color pipeline for the plane.
+ * the test if it's an invalid color pipeline for the plane. Passing NULL sets
+ * the plane color pipeline to "Bypass" but keeps the previously assigned
+ * pipeline, so that pending colorop changes are still submitted with the
+ * commit that deactivates it, which the kernel accepts because the colorop is
+ * in the plane's old state.
  */
 void igt_plane_set_color_pipeline(igt_plane_t *plane, igt_colorop_t *colorop)
 {
-	igt_assert(igt_plane_is_valid_colorop(plane, colorop));
+	igt_assert(!colorop || igt_plane_is_valid_colorop(plane, colorop));
 
-	plane->assigned_color_pipeline = colorop;
-	igt_plane_set_prop_enum(plane, IGT_PLANE_COLOR_PIPELINE, colorop->name);
+	if (colorop)
+		plane->assigned_color_pipeline = colorop;
+
+	igt_plane_set_prop_enum(plane,
+				IGT_PLANE_COLOR_PIPELINE,
+				colorop ? colorop->name : "Bypass");
 }
 
 /**

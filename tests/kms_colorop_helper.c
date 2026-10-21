@@ -462,11 +462,6 @@ void set_color_pipeline(igt_display_t *display,
 	}
 }
 
-void set_color_pipeline_bypass(igt_plane_t *plane)
-{
-	igt_plane_set_prop_enum(plane, IGT_PLANE_COLOR_PIPELINE, "Bypass");
-}
-
 static void reset_colorop(kms_colorop_t *colorop)
 {
 	igt_assert(colorop->colorop);
