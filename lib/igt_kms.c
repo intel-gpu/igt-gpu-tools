@@ -4898,7 +4898,23 @@ display_commit_changed(igt_display_t *display, enum igt_commit_style s)
 				       plane) {
 			if (s == COMMIT_ATOMIC) {
 				int fd;
+				igt_colorop_t *colorop;
+
 				plane->changed = 0;
+
+				/* clear changed flags on every colorop in the assigned chain
+				 * so already-committed property values aren't re-emitted on
+				 * the next commit.
+				 */
+				colorop = plane->assigned_color_pipeline;
+				while (colorop) {
+					uint32_t next_val;
+
+					colorop->changed = 0;
+					next_val = igt_colorop_get_prop(display, colorop,
+									IGT_COLOROP_NEXT);
+					colorop = igt_find_colorop(display, next_val);
+				}
 
 				fd = plane->values[IGT_PLANE_IN_FENCE_FD];
 				if (fd != -1)
