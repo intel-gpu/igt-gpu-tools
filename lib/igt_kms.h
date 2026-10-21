@@ -1032,6 +1032,10 @@ uint64_t igt_colorop_get_prop(igt_display_t *display, igt_colorop_t *colorop, en
 	} while (0)
 
 
+extern bool igt_colorop_has_prop_enum_value(igt_colorop_t *colorop,
+					    enum igt_atomic_colorop_properties prop,
+					    const char *val);
+
 extern bool igt_colorop_try_prop_enum(igt_colorop_t *colorop,
 				      enum igt_atomic_colorop_properties prop,
 				      const char *val);
