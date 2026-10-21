@@ -422,17 +422,18 @@ static inline bool igt_rotation_90_or_270(igt_rotation_t rotation)
 }
 
 typedef struct _igt_plane igt_plane_t;
+typedef struct _igt_colorop igt_colorop_t;
 
-typedef struct {
+typedef struct _igt_colorop {
 	uint32_t id;
 	igt_plane_t *plane;
+	igt_colorop_t *next;
 
 	char name[DRM_PROP_NAME_LEN];
 
 	uint64_t changed;
 	uint32_t props[IGT_NUM_COLOROP_PROPS];
 	uint64_t values[IGT_NUM_COLOROP_PROPS];
-
 } igt_colorop_t;
 
 struct igt_format_mods {
@@ -1031,6 +1032,31 @@ uint64_t igt_colorop_get_prop(igt_display_t *display, igt_colorop_t *colorop, en
 		igt_colorop_set_prop_changed(colorop, prop); \
 	} while (0)
 
+/**
+ * for_each_color_pipeline:
+ * @plane: plane to which the color pipelines belong
+ * @color_pipeline: the color pipeline to iterate
+ *
+ * Iterates through all color pipelines supported by @plane. If no color
+ * pipeline is supported, nothing happens.
+ */
+#define for_each_color_pipeline(plane, color_pipeline) \
+	for (int igt_unique(__i) = 0; \
+	     igt_unique(__i) < (plane)->num_color_pipelines && \
+	     ((color_pipeline) = (plane)->color_pipelines[igt_unique(__i)], true); \
+	     igt_unique(__i)++)
+
+/**
+ * for_each_colorop_in_pipeline:
+ * @pipeline: the first colorop in a color pipeline
+ * @colorop: the colorop to iterate
+ *
+ * Iterates through a color pipeline, starting from an initial colorop pointer
+ * and extending to all subsequent colorops pointed to by next.
+ */
+#define for_each_colorop_in_pipeline(pipeline, colorop) \
+	for ((colorop) = (pipeline); (colorop); \
+	     (colorop) = (colorop)->next)
 
 extern bool igt_colorop_has_prop_enum_value(igt_colorop_t *colorop,
 					    enum igt_atomic_colorop_properties prop,
@@ -1386,8 +1412,6 @@ drmModePropertyBlobRes *igt_get_writeback_formats_blob(igt_output_t *output);
 uint64_t igt_get_writeback_fb_id(igt_output_t *output);
 void igt_detach_crtc(igt_display_t *display, igt_output_t *output);
 void igt_get_and_wait_out_fence(igt_output_t *output);
-
-igt_colorop_t *igt_find_colorop(igt_display_t *display, uint32_t id);
 
 bool igt_wait_for_connector_status(int drm_fd, unsigned int connector_id, double timeout,
 				   int drm_mode);

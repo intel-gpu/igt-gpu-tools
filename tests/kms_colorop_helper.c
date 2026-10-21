@@ -290,29 +290,25 @@ static bool can_use_colorop(igt_display_t *display, igt_colorop_t *colorop, kms_
  * colorops[] to it.
  */
 static bool map_to_pipeline(igt_display_t *display,
-			    igt_colorop_t *colorop,
+			    igt_colorop_t *color_pipeline,
 			    kms_colorop_t *colorops[])
 {
-	igt_colorop_t *next = colorop;
+	igt_colorop_t *colorop;
 	kms_colorop_t *current_op;
 	int i = 0;
-	int prop_val = 0;
 
 	current_op = colorops[i];
 	i++;
 	igt_require(current_op);
 
-	while (next) {
-		if (can_use_colorop(display, next, current_op)) {
-			current_op->colorop = next;
+	for_each_colorop_in_pipeline(color_pipeline, colorop) {
+		if (can_use_colorop(display, colorop, current_op)) {
+			current_op->colorop = colorop;
 			current_op = colorops[i];
 			i++;
 			if (!current_op)
 				break;
 		}
-		prop_val = igt_colorop_get_prop(display, next,
-						IGT_COLOROP_NEXT);
-		next = igt_find_colorop(display, prop_val);
 	}
 
 	if (current_op) {
@@ -332,18 +328,16 @@ igt_colorop_t *get_color_pipeline(igt_display_t *display,
 			          igt_plane_t *plane,
 				  kms_colorop_t *colorops[])
 {
-	igt_colorop_t *colorop = NULL;
-	int i;
+	igt_colorop_t *color_pipeline;
 
 	/* go through all color pipelines */
-	for (i = 0; i < plane->num_color_pipelines; ++i) {
-		if (map_to_pipeline(display, plane->color_pipelines[i], colorops)) {
-			colorop = plane->color_pipelines[i];
-			break;
+	for_each_color_pipeline(plane, color_pipeline) {
+		if (map_to_pipeline(display, color_pipeline, colorops)) {
+			return color_pipeline;
 		}
 	}
 
-	return colorop;
+	return NULL;
 }
 
 static void fill_custom_1dlut(igt_display_t *display, kms_colorop_t *colorop)
@@ -438,8 +432,7 @@ void set_color_pipeline(igt_display_t *display,
 			kms_colorop_t *colorops[],
 			igt_colorop_t *color_pipeline)
 {
-	igt_colorop_t *next;
-	int prop_val = 0;
+	igt_colorop_t *colorop;
 	int i;
 
 	igt_plane_set_color_pipeline(plane, color_pipeline);
@@ -448,17 +441,12 @@ void set_color_pipeline(igt_display_t *display,
 		set_colorop(display, colorops[i]);
 
 	/* set unused ops in pipeline to bypass */
-	next = color_pipeline;
 	i = 0;
-	while (next) {
-		if (!colorops[i] || colorops[i]->colorop != next)
-			igt_colorop_set_prop_value(next, IGT_COLOROP_BYPASS, 1);
+	for_each_colorop_in_pipeline(color_pipeline, colorop) {
+		if (!colorops[i] || colorops[i]->colorop != colorop)
+			igt_colorop_set_prop_value(colorop, IGT_COLOROP_BYPASS, 1);
 		else
 			i++;
-
-		prop_val = igt_colorop_get_prop(display, next,
-						IGT_COLOROP_NEXT);
-		next = igt_find_colorop(display, prop_val);
 	}
 }
 

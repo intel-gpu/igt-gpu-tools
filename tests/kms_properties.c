@@ -239,9 +239,7 @@ static void run_colorop_property_tests(igt_display_t *display,
 {
 	struct igt_fb fb, afb;
 	igt_plane_t *plane;
-	igt_colorop_t *colorop;
-	int i;
-	int colorop_id = 0;
+	igt_colorop_t *colorop, *color_pipeline;
 
 	prepare_crtc(display, crtc, output,
 		     &fb);
@@ -269,23 +267,18 @@ static void run_colorop_property_tests(igt_display_t *display,
 		}
 
 		/* iterate over all color pipelines on plane */
-		for (i = 0; i < plane->num_color_pipelines; ++i) {
-			/* iterate over all colorops in pipeline*/
-			colorop = plane->color_pipelines[i];
-			igt_plane_set_color_pipeline(plane, colorop);
+		for_each_color_pipeline(plane, color_pipeline) {
+			igt_plane_set_color_pipeline(plane, color_pipeline);
 			igt_display_commit2(display, COMMIT_ATOMIC);
 
-			while (colorop) {
+			/* iterate over all colorops in pipeline*/
+			for_each_colorop_in_pipeline(color_pipeline, colorop) {
 				igt_info("Testing colorop properties on %s.#%d.#%d-%s (output: %s)\n",
 					  igt_crtc_name(crtc), plane->index,
 					  colorop->id,
 					  kmstest_plane_type_name(plane->type), output->name);
 				test_properties(display->drm_fd, DRM_MODE_OBJECT_COLOROP, colorop->id,
 						atomic, display->has_plane_color_pipeline);
-
-				colorop_id = igt_colorop_get_prop(display, colorop,
-								IGT_COLOROP_NEXT);
-				colorop = igt_find_colorop(display, colorop_id);
 			}
 		}
 

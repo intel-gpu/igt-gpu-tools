@@ -365,10 +365,8 @@ static void colorop_plane_test(igt_display_t *display,
 static void check_plane_colorop_ids(igt_display_t *display)
 {
 	igt_plane_t *plane;
-	int colorop_idx;
-	igt_colorop_t *next;
+	igt_colorop_t *colorop, *color_pipeline;
 	igt_crtc_t *crtc;
-	int prop_val = 0;
 
 	/* Use hash tables to track drm_planes and unique IDs */
 	GHashTable *plane_set = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -383,18 +381,15 @@ static void check_plane_colorop_ids(igt_display_t *display)
 
 			g_hash_table_add(plane_set, GINT_TO_POINTER(plane->drm_plane->plane_id));
 
-			for (colorop_idx = 0; colorop_idx < plane->num_color_pipelines; colorop_idx++) {
-				next = plane->color_pipelines[colorop_idx];
-				while (next) {
+			for_each_color_pipeline(plane, color_pipeline) {
+				for_each_colorop_in_pipeline(color_pipeline, colorop) {
 					/* Check if the ID already exists in the set */
-					if (g_hash_table_contains(id_set, GINT_TO_POINTER(next->id))) {
+					if (g_hash_table_contains(id_set, GINT_TO_POINTER(colorop->id))) {
 						igt_fail_on_f(true, "Duplicate colorop ID %u found on plane %d\n",
-						next->id, plane->drm_plane->plane_id);
+						colorop->id, plane->drm_plane->plane_id);
 					}
 
-					g_hash_table_add(id_set, GINT_TO_POINTER(next->id));
-					prop_val = igt_colorop_get_prop(display, next, IGT_COLOROP_NEXT);
-					next = igt_find_colorop(display, prop_val);
+					g_hash_table_add(id_set, GINT_TO_POINTER(colorop->id));
 				}
 			}
 		}

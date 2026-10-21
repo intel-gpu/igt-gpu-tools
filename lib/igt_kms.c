@@ -796,28 +796,6 @@ igt_plane_rotations(igt_display_t *display, igt_plane_t *plane,
 	return rotations;
 }
 
-/**
- * igt_find_colorop:
- * @display: display on which to look for colorop.
- * @id: DRM object id of the colorop.
- *
- * Returns: An igt_colorop_t if found, or NULL otherwise.
- */
-igt_colorop_t *igt_find_colorop(igt_display_t *display, uint32_t id)
-{
-	int i;
-
-	/* find corresponding igt_colorop */
-	for (i = 0; i < display->n_colorops; ++i) {
-		igt_colorop_t *colorop = &display->colorops[i];
-
-		if (colorop->id == id)
-			return colorop;
-	}
-
-	return NULL;
-}
-
 /*
  * Retrieve all the properies specified in props_name and store them into
  * colorop->props.
@@ -875,28 +853,34 @@ igt_fill_plane_color_pipelines(igt_display_t *display, igt_plane_t *plane,
 
 	for (i = 0; i < prop->count_enums; i++) {
 		if (prop->enums[i].value) {
-			igt_colorop_t *colorop = &display->colorops[display->n_colorops++];
+			igt_colorop_t *colorop;
 
 			igt_assert(display->n_colorops < MAX_NUM_COLOROPS);
+			colorop = &display->colorops[display->n_colorops++];
 
 			igt_fill_colorop(display, plane, colorop, prop->enums[i].value, prop->enums[i].name);
 			plane->color_pipelines[plane->num_color_pipelines++] = colorop;
 
 			/* get all NEXT colorops */
 			colorop_id = igt_colorop_get_prop(display, colorop,
-							IGT_COLOROP_NEXT);
+							  IGT_COLOROP_NEXT);
 			while (colorop_id) {
-				colorop = &display->colorops[display->n_colorops++];
+				igt_colorop_t *next;
+
 				igt_assert(display->n_colorops < MAX_NUM_COLOROPS);
-				igt_fill_colorop(display, plane, colorop, colorop_id, NULL);
+				next = &display->colorops[display->n_colorops++];
+				igt_fill_colorop(display, plane, next, colorop_id, NULL);
+
+				colorop->next = next;
+				colorop = next;
+
 				colorop_id = igt_colorop_get_prop(display, colorop,
-								IGT_COLOROP_NEXT);
+								  IGT_COLOROP_NEXT);
 			}
 		}
 	}
 
 	igt_assert(plane->num_color_pipelines < IGT_NUM_PLANE_COLOR_PIPELINES);
-
 }
 
 /*
@@ -3818,13 +3802,14 @@ igt_atomic_prepare_plane_commit(igt_plane_t *plane, igt_crtc_t *crtc,
  * Add colorop properties
  */
 static void
-igt_atomic_prepare_colorop_commit(igt_colorop_t *colorop, igt_crtc_t *crtc,
+igt_atomic_prepare_colorop_commit(igt_colorop_t *color_pipeline, igt_crtc_t *crtc,
 				  drmModeAtomicReq *req)
 {
 	igt_display_t *display = crtc->display;
-	int i, next_val;
+	igt_colorop_t *colorop;
+	int i;
 
-	while (colorop) {
+	for_each_colorop_in_pipeline(color_pipeline, colorop) {
 		LOG(display,
 		    "populating colorop data: %s.%d\n",
 		    igt_crtc_name(crtc),
@@ -3846,11 +3831,6 @@ igt_atomic_prepare_colorop_commit(igt_colorop_t *colorop, igt_crtc_t *crtc,
 							colorop->props[i],
 							colorop->values[i]));
 		}
-
-		/* get next colorop */
-		next_val = igt_colorop_get_prop(display, colorop,
-						IGT_COLOROP_NEXT);
-		colorop = igt_find_colorop(display, next_val);
 	}
 }
 
@@ -4423,18 +4403,16 @@ bool igt_plane_check_prop_is_mutable(igt_plane_t *plane,
  */
 bool igt_plane_is_valid_colorop(igt_plane_t *plane, igt_colorop_t *colorop)
 {
-	int i;
-	bool found = false;
+	igt_colorop_t *color_pipeline;
 
-	for (i = 0; i < plane->num_color_pipelines; i++) {
-		if (plane->color_pipelines[i] == colorop) {
-			found = true;
-			break;
-		}
+	for_each_color_pipeline(plane, color_pipeline) {
+		if (color_pipeline == colorop)
+			return true;
 	}
 
-	return found;
+	return false;
 }
+
 /**
  * igt_plane_set_color_pipeline:
  * @plane: Target plane.
@@ -4940,15 +4918,9 @@ display_commit_changed(igt_display_t *display, enum igt_commit_style s)
 				 * so already-committed property values aren't re-emitted on
 				 * the next commit.
 				 */
-				colorop = plane->assigned_color_pipeline;
-				while (colorop) {
-					uint32_t next_val;
-
+				for_each_colorop_in_pipeline(plane->assigned_color_pipeline,
+							     colorop)
 					colorop->changed = 0;
-					next_val = igt_colorop_get_prop(display, colorop,
-									IGT_COLOROP_NEXT);
-					colorop = igt_find_colorop(display, next_val);
-				}
 
 				fd = plane->values[IGT_PLANE_IN_FENCE_FD];
 				if (fd != -1)
