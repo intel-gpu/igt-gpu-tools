@@ -237,7 +237,7 @@ static void run_colorop_property_tests(igt_display_t *display,
 				       igt_crtc_t *crtc, igt_output_t *output,
 				       bool atomic)
 {
-	struct igt_fb fb;
+	struct igt_fb fb, afb;
 	igt_plane_t *plane;
 	igt_colorop_t *colorop;
 	int i;
@@ -255,6 +255,19 @@ static void run_colorop_property_tests(igt_display_t *display,
 			 igt_crtc_name(crtc), plane->index,
 			 kmstest_plane_type_name(plane->type), output->name);
 
+		/* A non-primary plane needs an fb of its own: AMD keeps the
+		 * CRTC active only while the primary plane is enabled.
+		 */
+		if (plane->type != DRM_PLANE_TYPE_PRIMARY) {
+			drmModeModeInfo *mode = igt_output_get_mode(output);
+
+			igt_create_pattern_fb(display->drm_fd, mode->hdisplay, mode->vdisplay,
+					      DRM_FORMAT_XRGB8888, DRM_FORMAT_MOD_LINEAR, &afb);
+
+			igt_plane_set_fb(plane, &afb);
+			igt_display_commit2(display, COMMIT_ATOMIC);
+		}
+
 		/* iterate over all color pipelines on plane */
 		for (i = 0; i < plane->num_color_pipelines; ++i) {
 			/* iterate over all colorops in pipeline*/
@@ -271,6 +284,13 @@ static void run_colorop_property_tests(igt_display_t *display,
 								IGT_COLOROP_NEXT);
 				colorop = igt_find_colorop(display, colorop_id);
 			}
+		}
+
+		/* only the fb created above needs to go away here */
+		if (plane->type != DRM_PLANE_TYPE_PRIMARY) {
+			igt_plane_set_fb(plane, NULL);
+			igt_display_commit2(display, COMMIT_ATOMIC);
+			igt_remove_fb(display->drm_fd, &afb);
 		}
 	}
 
