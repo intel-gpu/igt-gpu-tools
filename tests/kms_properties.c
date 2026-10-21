@@ -272,6 +272,9 @@ static void run_colorop_property_tests(igt_display_t *display,
 		for (i = 0; i < plane->num_color_pipelines; ++i) {
 			/* iterate over all colorops in pipeline*/
 			colorop = plane->color_pipelines[i];
+			igt_plane_set_color_pipeline(plane, colorop);
+			igt_display_commit2(display, COMMIT_ATOMIC);
+
 			while (colorop) {
 				igt_info("Testing colorop properties on %s.#%d.#%d-%s (output: %s)\n",
 					  igt_crtc_name(crtc), plane->index,
@@ -285,6 +288,8 @@ static void run_colorop_property_tests(igt_display_t *display,
 				colorop = igt_find_colorop(display, colorop_id);
 			}
 		}
+
+		igt_plane_set_color_pipeline(plane, NULL);
 
 		/* only the fb created above needs to go away here */
 		if (plane->type != DRM_PLANE_TYPE_PRIMARY) {
