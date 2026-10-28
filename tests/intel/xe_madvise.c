@@ -78,12 +78,17 @@ static void purgeable_setup_simple_bo(int fd, uint32_t *vm, uint32_t *bo,
  * trigger_memory_pressure - Force kernel to reclaim DONTNEED BOs
  * @fd: DRM file descriptor
  *
- * dGPU: over-fill VRAM by ~50 % so TTM evicts purgeable BOs.
+ * dGPU: fill VRAM and then over-fill it so TTM has to evict. The DONTNEED
+ * BOs under test were created before the pressure BOs, so they are the
+ * oldest on the LRU and get evicted (purged) first. Only the over-fill part
+ * ends up in system RAM (VRAM-resident pressure BOs do not consume RAM), so
+ * the over-fill is capped by available RAM, which lets the test run on
+ * systems where RAM is much smaller than VRAM.
  * iGPU: poke the shrinker via igt_purge_vm_caches() (avoids OOM).
  */
 static void trigger_memory_pressure(int fd)
 {
-	uint64_t mem_size, overpressure;
+	uint64_t mem_size, overpressure, ram_limit;
 	const uint64_t chunk = 8ull << 20; /* 8 MiB */
 	int max_objs, n = 0;
 	uint32_t *handles;
@@ -99,16 +104,17 @@ static void trigger_memory_pressure(int fd)
 
 	/* dGPU: fill VRAM + 50 % to force TTM eviction */
 	mem_size = xe_visible_vram_size(fd, 0);
-	overpressure = mem_size / 2;
+	ram_limit = (igt_get_avail_ram_mb() << 20) / 4;
+	overpressure = min_t(uint64_t, mem_size / 2, ram_limit);
 	if (overpressure < (64 << 20))
 		overpressure = 64 << 20;
 	max_objs = DIV_ROUND_UP(mem_size + overpressure, chunk);
 
-	/*
-	 * Pressure BOs are faulted in and kept alive until cleanup. If the
-	 * system is already low on RAM, this can cause OOM.
-	 */
-	igt_require_memory(max_objs, chunk, CHECK_RAM);
+	igt_debug("memory pressure: vram %" PRIu64 " MiB, over-fill %" PRIu64 " MiB\n",
+		  mem_size >> 20, overpressure >> 20);
+
+	/* Only the over-fill is evicted to system RAM, the rest stays in VRAM */
+	igt_require_memory(DIV_ROUND_UP(overpressure, chunk), chunk, CHECK_RAM);
 
 	/* Separate VM so pressure BOs don't interfere with the test */
 	vm = xe_vm_create(fd, 0, 0);
