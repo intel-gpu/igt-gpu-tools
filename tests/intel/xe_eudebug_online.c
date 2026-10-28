@@ -1518,6 +1518,7 @@ static void eu_attention_resume_trigger(struct xe_eudebug_debugger *d,
  * However all sync-host event will be logged in event's log.
  */
 #define MAX_EVENT_SIZE (32 * 1024)
+#define POLL_TIMEOUT 10
 static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
 {
 	struct drm_xe_eudebug_event_sync_host e = {};
@@ -1526,8 +1527,8 @@ static void read_queued_sync_host_events(struct xe_eudebug_debugger *d)
 
 	p.fd = d->fd;
 	do {
-		/* No timeout, checking for queued data */
-		ret = poll(&p, 1, 0);
+		/* Checking for queued data */
+		ret = poll(&p, 1, POLL_TIMEOUT);
 
 		if (ret == -1) {
 			igt_info("%s(): poll failed with errno %d\n",
@@ -1583,7 +1584,6 @@ static void sync_host_resume_trigger(struct xe_eudebug_debugger *d,
 	 * Make sure that all exceptions triggered by the same
 	 * breakpoint has been queued before calling eu control.
 	 */
-	sleep(1);
 	read_queued_sync_host_events(d);
 
 	/* workload was stopped by interrupt all */
