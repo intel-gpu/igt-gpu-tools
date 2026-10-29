@@ -2951,19 +2951,18 @@ check_and_cleanup:
  */
 static void test_oom(int fd)
 {
-#define BO_SIZE xe_bb_size(fd, SZ_512M)
-#define MAX_BUFS ((int)(xe_visible_vram_size(fd, 0) / BO_SIZE))
+	uint64_t vram_size = xe_visible_vram_size(fd, 0);
+	size_t bo_size = xe_bb_size(fd, min_t(uint64_t, SZ_512M, vram_size / 4));
+	int total_bufs = vram_size / bo_size;
 	uint64_t addr = 0x1a0000;
 	uint64_t vm_sync;
-	uint32_t bo[MAX_BUFS + 1];
-	uint32_t *data[MAX_BUFS + 1];
+	uint32_t bo[total_bufs + 1];
+	uint32_t *data[total_bufs + 1];
 	uint32_t vm;
 	struct drm_xe_sync sync[1] = {
 		{ .type = DRM_XE_SYNC_TYPE_USER_FENCE, .flags = DRM_XE_SYNC_FLAG_SIGNAL,
 		  .timeline_value = USER_FENCE_VALUE },
 	};
-	size_t bo_size = BO_SIZE;
-	int total_bufs = MAX_BUFS;
 	int bind_vm = 0;
 	bool oom = false;
 
