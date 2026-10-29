@@ -1,0 +1,7 @@
+#####################################################################
+#Tests are expected to be skipped because the required kernel
+#CPTCFG_DRM_XE_DEBUG configuration is not enabled.
+######################################################################
+igt@xe_wedged@(wedged-mode-toggle|wedged-at-any-timeout)$
+igt@xe_vm@bind-array-conflict-error-inject
+##################################################################
