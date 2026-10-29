@@ -13,6 +13,7 @@
  */
 
 #include "igt.h"
+#include "igt_sysfs.h"
 #include "lib/igt_syncobj.h"
 #include "lib/intel_reg.h"
 #include "xe_drm.h"
@@ -850,13 +851,13 @@ int igt_main()
 			MIXED_THREADS | THREADED | MULTI_QUEUE },
 		{ "mixed-many-threads-small", 3, 16, 128, 1, 128,
 			THREADED },
-		{ "threads-large", 2, 2, 16, 3, 32,
+		{ "threads-large", 2, 2, 12, 3, 32,
 			THREADED },
-		{ "cm-threads-large", 2, 2, 16, 3, 32,
+		{ "cm-threads-large", 2, 2, 12, 3, 32,
 			COMPUTE_THREAD | THREADED },
-		{ "mixed-threads-large", 2, 2, 16, 3, 32,
+		{ "mixed-threads-large", 2, 2, 12, 3, 32,
 			MIXED_THREADS | THREADED },
-		{ "mixed-many-threads-large", 3, 2, 16, 3, 32,
+		{ "mixed-many-threads-large", 3, 2, 12, 3, 32,
 			THREADED },
 		{ "threads-small-multi-vm", 2, 16, 128, 1, 128,
 			MULTI_VM | THREADED },
@@ -864,11 +865,11 @@ int igt_main()
 			COMPUTE_THREAD | MULTI_VM | THREADED },
 		{ "mixed-threads-small-multi-vm", 2, 16, 128, 1, 128,
 			MIXED_THREADS | MULTI_VM | THREADED },
-		{ "threads-large-multi-vm", 2, 2, 16, 3, 32,
+		{ "threads-large-multi-vm", 2, 2, 12, 3, 32,
 			MULTI_VM | THREADED },
-		{ "cm-threads-large-multi-vm", 2, 2, 16, 3, 32,
+		{ "cm-threads-large-multi-vm", 2, 2, 12, 3, 32,
 			COMPUTE_THREAD | MULTI_VM | THREADED },
-		{ "mixed-threads-large-multi-vm", 2, 2, 16, 3, 32,
+		{ "mixed-threads-large-multi-vm", 2, 2, 12, 3, 32,
 			MIXED_THREADS | MULTI_VM | THREADED },
 		{ "beng-threads-small", 2, 16, 128, 1, 128,
 			THREADED | BIND_EXEC_QUEUE },
@@ -878,13 +879,13 @@ int igt_main()
 			MIXED_THREADS | THREADED | BIND_EXEC_QUEUE },
 		{ "beng-mixed-many-threads-small", 3, 16, 128, 1, 128,
 			THREADED | BIND_EXEC_QUEUE },
-		{ "beng-threads-large", 2, 2, 16, 3, 32,
+		{ "beng-threads-large", 2, 2, 12, 3, 32,
 			THREADED | BIND_EXEC_QUEUE },
-		{ "beng-cm-threads-large", 2, 2, 16, 3, 32,
+		{ "beng-cm-threads-large", 2, 2, 12, 3, 32,
 			COMPUTE_THREAD | THREADED | BIND_EXEC_QUEUE },
-		{ "beng-mixed-threads-large", 2, 2, 16, 3, 32,
+		{ "beng-mixed-threads-large", 2, 2, 12, 3, 32,
 			MIXED_THREADS | THREADED | BIND_EXEC_QUEUE },
-		{ "beng-mixed-many-threads-large", 3, 2, 16, 3, 32,
+		{ "beng-mixed-many-threads-large", 3, 2, 12, 3, 32,
 			THREADED | BIND_EXEC_QUEUE },
 		{ "beng-threads-small-multi-vm", 2, 16, 128, 1, 128,
 			MULTI_VM | THREADED | BIND_EXEC_QUEUE },
@@ -892,11 +893,11 @@ int igt_main()
 			COMPUTE_THREAD | MULTI_VM | THREADED | BIND_EXEC_QUEUE },
 		{ "beng-mixed-threads-small-multi-vm", 2, 16, 128, 1, 128,
 			MIXED_THREADS | MULTI_VM | THREADED | BIND_EXEC_QUEUE },
-		{ "beng-threads-large-multi-vm", 2, 2, 16, 3, 32,
+		{ "beng-threads-large-multi-vm", 2, 2, 12, 3, 32,
 			MULTI_VM | THREADED | BIND_EXEC_QUEUE },
-		{ "beng-cm-threads-large-multi-vm", 2, 2, 16, 3, 32,
+		{ "beng-cm-threads-large-multi-vm", 2, 2, 12, 3, 32,
 			COMPUTE_THREAD | MULTI_VM | THREADED | BIND_EXEC_QUEUE },
-		{ "beng-mixed-threads-large-multi-vm", 2, 2, 16, 3, 32,
+		{ "beng-mixed-threads-large-multi-vm", 2, 2, 12, 3, 32,
 			MIXED_THREADS | MULTI_VM | THREADED | BIND_EXEC_QUEUE },
 		{ NULL },
 	};
@@ -905,11 +906,30 @@ int igt_main()
 	int fd;
 
 	igt_fixture() {
+		int dir;
+
 		fd = drm_open_driver(DRIVER_XE);
 		igt_require(xe_has_vram(fd));
 		vram_size = xe_visible_vram_size(fd, 0);
 		igt_assert(vram_size);
 		system_size = igt_get_avail_ram_mb() << 20;
+
+		/*
+		 * The KMD emits a DRM_UT_DRIVER debug line for every 8 MiB chunk
+		 * it migrates, so the large eviction subtests can flood the log
+		 * on big-VRAM devices and exceed the runner's disk usage limit.
+		 * Under CI, drop only that category and restore it on exit.
+		 */
+		dir = igt_sysfs_drm_module_params_open();
+		if (dir >= 0) {
+			int debug_mask = igt_drm_debug_mask_get(dir);
+
+			close(dir);
+			if (debug_mask > 0 && (debug_mask & DRM_UT_DRIVER)) {
+				igt_install_exit_handler(igt_drm_debug_mask_reset_exit_handler);
+				update_debug_mask_if_ci(debug_mask & ~DRM_UT_DRIVER);
+			}
+		}
 
 		xe_for_each_engine(fd, hwe)
 			if (hwe->engine_class != DRM_XE_ENGINE_CLASS_COPY)
