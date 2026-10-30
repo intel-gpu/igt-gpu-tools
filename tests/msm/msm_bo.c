@@ -414,6 +414,244 @@ int igt_main()
 		igt_msm_bo_free(bo);
 	}
 
+	/* Memory Advice Tests - Positive Cases */
+	igt_describe("Set WILLNEED advice and verify that the buffer is retained");
+	igt_subtest("bo-madvise-willneed") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = MSM_MADV_WILLNEED;
+
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+		igt_assert_eq(req.retained, 1);
+
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Set DONTNEED advice on a buffer object");
+	igt_subtest("bo-madvise-dontneed") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = MSM_MADV_DONTNEED;
+
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+
+		igt_info("Buffer retained status after DONTNEED: %d\n", req.retained);
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Apply WILLNEED and DONTNEED advice to the same buffer");
+	igt_subtest("bo-madvise-multiple-calls") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = MSM_MADV_WILLNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+		igt_assert_eq(req.retained, 1);
+
+		req.madv = MSM_MADV_DONTNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+
+		igt_info("Buffer retained status after DONTNEED: %d\n", req.retained);
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Apply DONTNEED advice to a mapped buffer object");
+	igt_subtest("bo-madvise-mapped-buffer") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+		void *map;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		map = igt_msm_bo_map(bo);
+		igt_assert_f(map, "Failed to map buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = MSM_MADV_DONTNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+
+		igt_info("Mapped buffer retained status: %d\n", req.retained);
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Apply WILLNEED advice to a cached buffer object");
+	igt_subtest("bo-madvise-cached-buffer") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_CACHED);
+		igt_assert_f(bo, "Failed to allocate cached buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = MSM_MADV_WILLNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+		igt_assert_eq(req.retained, 1);
+
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Apply DONTNEED advice to a large buffer object");
+	igt_subtest("bo-madvise-large-buffer") {
+		struct drm_msm_gem_madvise req = { 0 };
+		const size_t large_size = 64 * 1024 * 1024;
+		struct msm_bo *bo;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, large_size, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate large buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = MSM_MADV_DONTNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+
+		igt_info("Large buffer retained status: %d\n", req.retained);
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Apply memory advice to multiple buffer objects");
+	igt_subtest("bo-madvise-multiple-buffers") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo1, *bo2;
+		int ret;
+
+		bo1 = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		bo2 = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE * 2, MSM_BO_CACHED);
+		igt_assert_f(bo1 && bo2, "Failed to allocate buffer objects\n");
+
+		req.handle = bo1->handle;
+		req.madv = MSM_MADV_WILLNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+		igt_assert_eq(req.retained, 1);
+
+		req.handle = bo2->handle;
+		req.madv = MSM_MADV_DONTNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req);
+		igt_assert_eq(ret, 0);
+
+		igt_info("Second buffer retained status: %d\n", req.retained);
+		igt_msm_bo_free(bo1);
+		igt_msm_bo_free(bo2);
+	}
+
+	igt_describe("Apply DONTNEED advice after balanced CPU access");
+	igt_subtest("bo-madvise-after-cpu-prep") {
+		struct drm_msm_gem_cpu_prep prep_req = { 0 };
+		struct drm_msm_gem_cpu_fini fini_req = { 0 };
+		struct drm_msm_gem_madvise madv_req = { 0 };
+		struct msm_bo *bo;
+		uint32_t *ptr;
+		void *map;
+		int ret;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		map = igt_msm_bo_map(bo);
+		igt_assert_f(map, "Failed to map buffer object\n");
+		ptr = map;
+
+		prep_req.handle = bo->handle;
+		prep_req.op = MSM_PREP_READ | MSM_PREP_WRITE | MSM_PREP_NOSYNC;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_CPU_PREP, &prep_req);
+		igt_assert_eq(ret, 0);
+
+		ptr[0] = 0xDEADBEEF;
+
+		fini_req.handle = bo->handle;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_CPU_FINI, &fini_req);
+		igt_assert_eq(ret, 0);
+
+		madv_req.handle = bo->handle;
+		madv_req.madv = MSM_MADV_DONTNEED;
+		ret = igt_ioctl(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &madv_req);
+		igt_assert_eq(ret, 0);
+
+		igt_info("Buffer retained status: %d\n", madv_req.retained);
+		igt_msm_bo_free(bo);
+	}
+
+	/* Memory Advice Tests - Negative Cases */
+	igt_describe("Reject memory advice for an invalid buffer handle");
+	igt_subtest("bo-madvise-invalid-bo") {
+		struct drm_msm_gem_madvise req = { 0 };
+
+		req.handle = 0xDEADBEEF;
+		req.madv = MSM_MADV_WILLNEED;
+
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req, ENOENT);
+	}
+
+	igt_describe("Reject memory advice for handle zero");
+	igt_subtest("bo-madvise-zero-handle") {
+		struct drm_msm_gem_madvise req = { 0 };
+
+		req.handle = 0;
+		req.madv = MSM_MADV_WILLNEED;
+
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req, ENOENT);
+	}
+
+	igt_describe("Reject an invalid memory advice value");
+	igt_subtest("bo-madvise-invalid-advice") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		req.handle = bo->handle;
+		req.madv = 0xDEADBEEF;
+
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req, EINVAL);
+		igt_msm_bo_free(bo);
+	}
+
+	igt_describe("Reject memory advice after a buffer has been freed");
+	igt_subtest("bo-madvise-after-free") {
+		struct drm_msm_gem_madvise req = { 0 };
+		struct msm_bo *bo;
+		uint32_t handle;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+		handle = bo->handle;
+
+		igt_msm_bo_free(bo);
+
+		req.handle = handle;
+		req.madv = MSM_MADV_WILLNEED;
+
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_MADVISE, &req, ENOENT);
+	}
+
 	igt_fixture() {
 		igt_msm_dev_close(dev);
 	}
