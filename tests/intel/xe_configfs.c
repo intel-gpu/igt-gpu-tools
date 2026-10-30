@@ -26,6 +26,8 @@
 static char bus_addr[NAME_MAX];
 static struct pci_device *pci_dev;
 
+static bool configfs_group_preexisting;
+
 static bool check_registers(const uint32_t reg[], const uint32_t val[],
 			    size_t max)
 {
@@ -60,7 +62,7 @@ static void restore(int sig)
 
 	/* Drop all custom configfs settings from subtests */
 	configfs_fd = igt_configfs_open("xe");
-	if (configfs_fd >= 0)
+	if (configfs_fd >= 0 && !configfs_group_preexisting)
 		igt_fs_remove_dir(configfs_fd, bus_addr);
 	close(configfs_fd);
 
@@ -70,10 +72,19 @@ static void restore(int sig)
 
 static void set_survivability_mode(int configfs_device_fd, bool value)
 {
+	int ret;
+
 	igt_audio_driver_unload(NULL);
-	igt_kmod_unbind("xe", bus_addr);
+
+	ret = igt_kmod_unbind("xe", bus_addr);
+	igt_assert_f(!ret, "Failed to unbind xe from %s: %s\n",
+		     bus_addr, strerror(-ret));
+
 	igt_sysfs_set_boolean(configfs_device_fd, "survivability_mode", value);
-	igt_kmod_bind("xe", bus_addr);
+
+	ret = igt_kmod_bind("xe", bus_addr);
+	igt_assert_f(!ret, "Failed to bind xe to %s: %s\n",
+		     bus_addr, strerror(-ret));
 }
 
 /**
@@ -93,6 +104,9 @@ static void test_survivability_mode(int configfs_device_fd)
 
 	fd = open(path, O_RDONLY);
 	igt_assert_f(fd >= 0, "Survivability mode not set\n");
+
+	set_survivability_mode(configfs_device_fd, false);
+
 	close(fd);
 }
 
@@ -357,23 +371,6 @@ static void set_bus_addr(int fd)
 		 pci_dev->domain, pci_dev->bus, pci_dev->dev, pci_dev->func);
 }
 
-static int create_device_configfs_group(int configfs_fd)
-{
-	mode_t mode = S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-	int configfs_device_fd;
-
-	configfs_device_fd = igt_fs_create_dir(configfs_fd, bus_addr, mode);
-	igt_assert(configfs_device_fd);
-
-	return configfs_device_fd;
-}
-
-static void close_configfs_group(int configfs_fd, int configfs_device_fd)
-{
-	close(configfs_device_fd);
-	igt_fs_remove_dir(configfs_fd, bus_addr);
-}
-
 int igt_main()
 {
 	int fd, configfs_fd, configfs_device_fd;
@@ -412,62 +409,78 @@ int igt_main()
 	igt_subtest("survivability-mode") {
 		igt_require(has_survivability);
 		igt_require_f(!is_vf_device, "survivability mode not supported in VF\n");
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_survivability_mode(configfs_device_fd);
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate engines_allowed with invalid options");
 	igt_subtest("engines-allowed-invalid") {
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_engines_allowed_invalid(configfs_device_fd);
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate engines_allowed");
 	igt_subtest("engines-allowed") {
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_engines_allowed(configfs_device_fd);
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate gt_types_allowed");
 	igt_subtest("gt-types-allowed") {
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_gt_types_allowed(configfs_device_fd);
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate ctx_restore_post_bb with invalid options");
 	igt_subtest("ctx-restore-post-bb-invalid") {
 		igt_skip_on_f(is_vf_device, "MMIO register readback not possible on VF\n");
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_ctx_restore_invalid(configfs_device_fd, "post");
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate ctx_restore_post_bb");
 	igt_subtest("ctx-restore-post-bb") {
 		igt_skip_on_f(is_vf_device, "MMIO register readback not possible on VF\n");
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_ctx_restore(configfs_device_fd, "post", engine);
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate ctx_restore_mid_bb with invalid options");
 	igt_subtest("ctx-restore-mid-bb-invalid") {
 		igt_skip_on_f(is_vf_device, "MMIO register readback not possible on VF\n");
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_ctx_restore_invalid(configfs_device_fd, "mid");
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_describe("Validate ctx_restore_mid_bb");
 	igt_subtest("ctx-restore-mid-bb") {
 		igt_skip_on_f(is_vf_device, "MMIO register readback not possible on VF\n");
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		test_ctx_restore(configfs_device_fd, "mid", engine);
-		close_configfs_group(configfs_fd, configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 	}
 
 	igt_fixture() {

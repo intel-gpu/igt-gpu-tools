@@ -40,6 +40,8 @@
 
 static char bus_addr[NAME_MAX];
 
+static bool configfs_group_preexisting;
+
 static void ignore_wedged_in_dmesg(void)
 {
 	/* this is needed for igt_runner so it will ignore it */
@@ -162,7 +164,7 @@ static void restore(int sig)
 	igt_kmod_unbind("xe", bus_addr);
 
 	configfs_fd = igt_configfs_open("xe");
-	if (configfs_fd >= 0)
+	if (configfs_fd >= 0 && !configfs_group_preexisting)
 		igt_fs_remove_dir(configfs_fd, bus_addr);
 	close(configfs_fd);
 
@@ -194,17 +196,6 @@ static void test_i2c_functionality(int configfs_device_fd, struct pci_device *pc
 	}
 }
 
-static int create_device_configfs_group(int configfs_fd)
-{
-	mode_t mode = S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-	int configfs_device_fd;
-
-	configfs_device_fd = igt_fs_create_dir(configfs_fd, bus_addr, mode);
-	igt_assert(configfs_device_fd);
-
-	return configfs_device_fd;
-}
-
 static void test_spinner_after_recovery(int fd)
 {
 	uint64_t ahnd;
@@ -232,7 +223,8 @@ int igt_main()
 		igt_device_get_pci_slot_name(fd, bus_addr);
 		configfs_fd = igt_configfs_open("xe");
 		igt_require(configfs_fd != -1);
-		configfs_device_fd = create_device_configfs_group(configfs_fd);
+		configfs_device_fd = igt_configfs_create_device_group(configfs_fd, bus_addr,
+								      &configfs_group_preexisting);
 		igt_install_exit_handler(restore);
 	}
 
@@ -269,8 +261,8 @@ int igt_main()
 	}
 
 	igt_fixture() {
-		igt_fs_remove_dir(configfs_fd, bus_addr);
-		close(configfs_device_fd);
+		igt_configfs_close_device_group(configfs_fd, bus_addr, configfs_device_fd,
+						configfs_group_preexisting);
 		close(configfs_fd);
 		drm_close_driver(fd);
 	}
