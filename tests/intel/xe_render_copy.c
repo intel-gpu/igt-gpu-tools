@@ -637,8 +637,10 @@ static void render_stress_copy(int fd, struct igt_collection *set,
 	/* End all mem copy threads */
 	for (int i = 0; i < thread_copy_count; i++)
 		xe_spin_end(data_mem_copy[i].spin);
-	for (int i = 0; i < thread_copy_count; i++)
+	for (int i = 0; i < thread_copy_count; i++) {
 		pthread_join(thread_mem_copy[i], NULL);
+		pthread_mutex_destroy(&data_mem_copy[i].lock_init_spin);
+	}
 
 	put_ahnd(ahnd);
 	xe_vm_destroy(fd, vm);

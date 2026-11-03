@@ -495,6 +495,11 @@ threads(int fd, struct drm_xe_engine_class_instance *eci,
 
 	for (i = 0; i < n_threads; ++i)
 		pthread_join(threads_data[i].thread, NULL);
+
+	free(threads_data);
+	pthread_barrier_destroy(&barrier);
+	pthread_mutex_destroy(&mutex);
+	pthread_cond_destroy(&cond);
 }
 
 static uint64_t calc_bo_size(uint64_t vram_size, int mul, int div)

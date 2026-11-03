@@ -1480,6 +1480,8 @@ static void threads(int fd, int flags)
 		xe_vm_destroy(fd, vm_compute_mode);
 	free(threads_data);
 	pthread_barrier_destroy(&barrier);
+	pthread_mutex_destroy(&mutex);
+	pthread_cond_destroy(&cond);
 }
 
 /*

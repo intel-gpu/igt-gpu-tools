@@ -489,6 +489,8 @@ test_eu_busy(uint64_t duration_sec)
 		pthread_join(threads_data[n].thread, NULL);
 
 	free(threads_data);
+	pthread_mutex_destroy(&mutex);
+	pthread_cond_destroy(&cond);
 
 	drm_close_driver(fd);
 }

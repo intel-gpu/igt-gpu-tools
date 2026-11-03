@@ -339,6 +339,7 @@ static void *thread_fn_reimport_vs_close(void *p)
 	}
 
 	pthread_barrier_destroy(&g_barrier);
+	free(threads);
 	drm_close_driver(fds[0]);
 	close(fds[1]);
 

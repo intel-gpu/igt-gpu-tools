@@ -312,6 +312,9 @@ check_all_pages_threads(void *ptr, uint64_t alloc_size, uint64_t stride,
 	for (i = 0; i < n_threads; ++i)
 		pthread_join(threads_check_data[i].thread, NULL);
 	free(threads_check_data);
+	pthread_barrier_destroy(&barrier);
+	pthread_mutex_destroy(&mutex);
+	pthread_cond_destroy(&cond);
 }
 
 static void touch_all_pages(int fd, uint32_t exec_queue, void *ptr,
@@ -2225,6 +2228,9 @@ threads(int fd, int n_exec_queues, int n_execs, size_t bo_size,
 			free(alloc);
 	}
 	free(threads_data);
+	pthread_barrier_destroy(&barrier);
+	pthread_mutex_destroy(&mutex);
+	pthread_cond_destroy(&cond);
 
 	if (is_hugepg_enable)
 		reset_nr_hugepages();
