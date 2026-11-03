@@ -1072,6 +1072,156 @@ int igt_main()
 		igt_msm_bo_free(bo);
 	}
 
+	/* Buffer Free Tests - Positive Cases */
+	igt_describe("Free single buffer object");
+	igt_subtest("bo-free-single") {
+		struct msm_bo *bo;
+		struct drm_msm_gem_info req = { 0 };
+		uint32_t handle;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+		handle = bo->handle;
+
+		igt_msm_bo_free(bo);
+
+		/* Verify the handle is actually gone */
+		req.handle = handle;
+		req.info = MSM_INFO_GET_IOVA;
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_INFO, &req, ENOENT);
+
+		igt_info("Successfully freed single buffer object (handle %u)\n", handle);
+	}
+
+	igt_describe("Free multiple buffer objects");
+	igt_subtest("bo-free-multiple") {
+		struct msm_bo *bo1, *bo2, *bo3;
+		uint32_t handle1, handle2, handle3;
+
+		/* Allocate multiple buffers */
+		bo1 = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		bo2 = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE * 2, MSM_BO_CACHED);
+		bo3 = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE * 4, MSM_BO_WC);
+
+		igt_assert_f(bo1 && bo2 && bo3, "Failed to allocate buffer objects\n");
+
+		handle1 = bo1->handle;
+		handle2 = bo2->handle;
+		handle3 = bo3->handle;
+
+		/* Free all buffers */
+		igt_msm_bo_free(bo1);
+		igt_msm_bo_free(bo2);
+		igt_msm_bo_free(bo3);
+
+		igt_info("Successfully freed multiple buffer objects (handles %u, %u, %u)\n",
+			 handle1, handle2, handle3);
+	}
+
+	igt_describe("Free large buffer object");
+	igt_subtest("bo-free-large") {
+		struct msm_bo *bo;
+		size_t large_size = 64 * 1024 * 1024; /* 64MB */
+		uint32_t handle;
+
+		bo = igt_msm_bo_new(dev, large_size, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate large buffer (64MB)\n");
+		handle = bo->handle;
+
+		igt_msm_bo_free(bo);
+
+		igt_info("Successfully freed large buffer (64MB, handle %u)\n", handle);
+	}
+
+	igt_describe("Allocate and free buffers in sequence");
+	igt_subtest("bo-free-sequence") {
+		const int num_iterations = 10;
+
+		for (int i = 0; i < num_iterations; i++) {
+			struct msm_bo *bo;
+			uint32_t handle;
+
+			bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+			igt_assert_f(bo, "Failed to allocate buffer in iteration %d\n", i);
+			handle = bo->handle;
+
+			igt_msm_bo_free(bo);
+
+			igt_debug("Iteration %d: allocated and freed handle %u\n", i, handle);
+		}
+
+		igt_info("Successfully completed %d allocate/free cycles\n", num_iterations);
+	}
+
+	/* Buffer Free Tests - Negative Cases */
+	igt_describe("Free invalid handle (expects EINVAL)");
+	igt_subtest("bo-free-invalid") {
+		struct drm_gem_close close_req = { 0 };
+
+		close_req.handle = 0xDEADBEEF;
+
+		do_ioctl_err(dev->fd, DRM_IOCTL_GEM_CLOSE, &close_req, EINVAL);
+
+		igt_info("Correctly rejected freeing invalid handle with EINVAL\n");
+	}
+
+	igt_describe("Free same handle twice (expects EINVAL)");
+	igt_subtest("bo-double-free") {
+		struct msm_bo *bo;
+		struct drm_gem_close close_req = { 0 };
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+
+		close_req.handle = bo->handle;
+
+		/*
+		 * Free it once using gem_close and free bo struct manually
+		 * (bypassing igt_msm_bo_free to test double-free behavior)
+		 */
+		gem_close(dev->fd, bo->handle);
+		free(bo);
+
+		/* Try to free it again - should fail */
+		do_ioctl_err(dev->fd, DRM_IOCTL_GEM_CLOSE, &close_req, EINVAL);
+
+		igt_info("Correctly rejected double-free with EINVAL\n");
+	}
+
+	igt_describe("Free handle zero (expects EINVAL)");
+	igt_subtest("bo-free-zero-handle") {
+		struct drm_gem_close close_req = { 0 };
+
+		close_req.handle = 0;
+
+		do_ioctl_err(dev->fd, DRM_IOCTL_GEM_CLOSE, &close_req, EINVAL);
+
+		igt_info("Correctly rejected freeing handle 0 with EINVAL\n");
+	}
+
+	igt_describe("Query offset and IOVA of a freed buffer (expects ENOENT)");
+	igt_subtest("bo-use-after-free") {
+		struct msm_bo *bo;
+		struct drm_msm_gem_info req = { 0 };
+		uint32_t handle;
+
+		bo = igt_msm_bo_new(dev, DEFAULT_BUFFER_SIZE, MSM_BO_WC);
+		igt_assert_f(bo, "Failed to allocate buffer object\n");
+		handle = bo->handle;
+
+		igt_msm_bo_free(bo);
+
+		/* Both info queries on the freed handle must fail */
+		req.handle = handle;
+		req.info = MSM_INFO_GET_IOVA;
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_INFO, &req, ENOENT);
+
+		req.info = MSM_INFO_GET_OFFSET;
+		do_ioctl_err(dev->fd, DRM_IOCTL_MSM_GEM_INFO, &req, ENOENT);
+
+		igt_info("Correctly rejected use-after-free with ENOENT\n");
+	}
+
 	igt_fixture() {
 		igt_msm_dev_close(dev);
 	}
