@@ -634,6 +634,8 @@ static void render_stress_copy(int fd, struct igt_collection *set,
 		 render_duration_total / render_count,
 		 render_duration_min, render_duration_max);
 
+	buf_ops_destroy(bops);
+
 	/* End all mem copy threads */
 	for (int i = 0; i < thread_copy_count; i++)
 		xe_spin_end(data_mem_copy[i].spin);
