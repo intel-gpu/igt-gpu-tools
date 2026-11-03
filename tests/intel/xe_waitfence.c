@@ -136,6 +136,18 @@ waitfence(int fd, enum waittype wt)
 			  ", elapsed: %" PRId64 "\n",
 			  timeout, signalled, signalled - current);
 	}
+
+	if (wt == ENGINE)
+		xe_exec_queue_destroy(fd, exec_queue);
+
+	gem_close(fd, bo_1);
+	gem_close(fd, bo_2);
+	gem_close(fd, bo_3);
+	gem_close(fd, bo_4);
+	gem_close(fd, bo_5);
+	gem_close(fd, bo_6);
+	gem_close(fd, bo_7);
+	xe_vm_destroy(fd, vm);
 }
 
 /**
@@ -208,6 +220,9 @@ invalid_flag(int fd)
 	do_bind(fd, vm, bo, 0, 0x200000, 0x40000, 1);
 
 	do_ioctl_err(fd, DRM_IOCTL_XE_WAIT_USER_FENCE, &wait, EINVAL);
+
+	gem_close(fd, bo);
+	xe_vm_destroy(fd, vm);
 }
 
 static void
@@ -232,6 +247,9 @@ invalid_ops(int fd)
 	do_bind(fd, vm, bo, 0, 0x200000, 0x40000, 1);
 
 	do_ioctl_err(fd, DRM_IOCTL_XE_WAIT_USER_FENCE, &wait, EINVAL);
+
+	gem_close(fd, bo);
+	xe_vm_destroy(fd, vm);
 }
 
 static void
@@ -304,6 +322,8 @@ exec_queue_reset_wait(int fd)
 		munmap(data, bb_size);
 		gem_close(fd, bo);
 	}
+
+	xe_vm_destroy(fd, vm);
 }
 
 int igt_main()

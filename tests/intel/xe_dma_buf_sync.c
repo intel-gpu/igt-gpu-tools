@@ -219,11 +219,15 @@ test_export_dma_buf(struct drm_xe_engine_class_instance *hwe0,
 	for (i = 0; i < n_bo; ++i) {
 		munmap(data[i], bo_size);
 		gem_close(fd[0], bo[i]);
+		gem_close(fd[1], import_bo[i]);
 		close(dma_buf_fd[i]);
 	}
 
-	for (i = 0; i < N_FD; ++i)
+	for (i = 0; i < N_FD; ++i) {
+		xe_exec_queue_destroy(fd[i], exec_queue[i]);
+		xe_vm_destroy(fd[i], vm[i]);
 		drm_close_driver(fd[i]);
+	}
 }
 
 int igt_main()
