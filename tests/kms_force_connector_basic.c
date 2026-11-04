@@ -392,7 +392,7 @@ int igt_main_args("", long_opts, help_str, opt_handler, NULL)
 			drmModeFreeConnector(connector);
 		}
 
-		igt_require(connector_id);
+		igt_require_f(connector_id, "no VGA nor HDMI connector found\n");
 
 end:
 		/* Reacquire status after clearing any previous overrides. */
