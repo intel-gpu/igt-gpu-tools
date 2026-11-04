@@ -1216,6 +1216,16 @@ xe_vm_madvixe_pat_attr(int fd, uint32_t vm, uint64_t addr, uint64_t range,
 		      DRM_XE_MEM_RANGE_ATTR_PAT, pat_index, 0, 0);
 }
 
+static bool pat_idx_is_reserved(const struct intel_pat_cache *pat_sw_config,
+				int32_t num_pat_entries,
+				uint8_t pat_idx)
+{
+	if (pat_idx >= num_pat_entries)
+		return false;
+
+	return pat_sw_config->entries[pat_idx].rsvd;
+}
+
 static void
 xe_vm_madvise_atomic_attr(int fd, uint32_t vm, uint64_t addr, uint64_t range,
 			  int mem_attr)
@@ -2647,6 +2657,8 @@ int igt_main()
 
 	int fd, svm_compute_loops = getenv_int("IGT_SVM_COMPUTE_LOOPS", 1);
 	uint16_t dev_id;
+	struct intel_pat_cache pat_sw_config = {};
+	int32_t num_pat_entries = 0;
 
 	igt_fixture() {
 		struct xe_device *xe;
@@ -2658,6 +2670,19 @@ int igt_main()
 		va_bits = xe->va_bits;
 		open_sync_file();
 		dev_id = intel_get_drm_devid(fd);
+
+		/*
+		 * KMD may mark PAT entries as reserved for various reasons
+		 * (e.g. workarounds). Older kernels without the debugfs
+		 * pat_sw_config entry don't expose that information, so
+		 * treat every index as usable in that case.
+		 */
+		num_pat_entries = xe_get_pat_sw_config(fd, &pat_sw_config, 0);
+		if (num_pat_entries <= 0) {
+			igt_debug("Couldn't get Xe PAT software configuration (%d)\n",
+				  num_pat_entries);
+			num_pat_entries = 0;
+		}
 	}
 
 	for (const struct section *s = sections; s->name; s++) {
@@ -2879,6 +2904,8 @@ int igt_main()
 
 	for (const struct section *s = intel_get_pat_idx_functions; s->name; s++) {
 		igt_subtest_f("pat-index-%s", s->name) {
+			uint8_t pat_idx;
+
 			if ((strstr(s->name, "madvise-pat-idx-wt-") ||
 			     strstr(s->name, "madvise-pat-idx-uc-comp-")) &&
 			     !xe_has_vram(fd)) {
@@ -2887,6 +2914,11 @@ int igt_main()
 			if (IS_PONTEVECCHIO(dev_id) &&
 			    strstr(s->name, "madvise-pat-idx-uc-comp-"))
 				igt_skip("Skipping compression-related PAT index on PVC\n");
+
+			pat_idx = s->fn(fd);
+			igt_skip_on_f(pat_idx_is_reserved(&pat_sw_config, num_pat_entries,
+							  pat_idx),
+				      "PAT index %u is reserved\n", pat_idx);
 			xe_for_each_engine(fd, hwe)
 				test_exec(fd, hwe, 1, 1, SZ_4M, 0, 0, NULL, NULL, s->flags, s->fn);
 		}
