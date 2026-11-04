@@ -2268,8 +2268,6 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	if (data->gfx_ver < 3500)
 		cur_ip += data->bb_offset;
 
-	read_queued_sync_host_events(d);
-
 	/*
 	 * Sync-host event should be called for shader breakpoints on following stages:
 	 * - preamble nop,
@@ -2290,6 +2288,15 @@ static void sync_host_resume_caching_trigger(struct xe_eudebug_debugger *d,
 	} else {
 		cur_instr = -1;
 	}
+
+	if ((cur_instr + 1) < data->steps_done) {
+		igt_debug("Ignoring serviced caching breakpoint %#x, stage=%d, steps=%u\n",
+			  cur_ip, cur_instr + 1, data->steps_done);
+		return;
+	}
+	igt_assert_eq(cur_instr + 1, data->steps_done);
+
+	read_queued_sync_host_events(d);
 
 	next_bp = data->first_aip + (cur_instr + 1) * data->aip_step;
 	igt_debug("Breakpoint=%#x Step=%d/%d\n", cur_ip, data->steps_done, data->instruction_count + 2);
