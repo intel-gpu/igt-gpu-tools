@@ -82,6 +82,7 @@
 			{ "CRI": "../intel-ci/xe.cri.core.blocklist.txt" },
 			{ "NVL": "../intel-ci/xe.nvl.core.blocklist.txt" },
 			{ "PTL": "../intel-ci/xe.ptl.core.blocklist.txt" },
+			{ "MULTIGPU-CRI": "../intel-ci/xe.multigpu.blocklist.txt" },
 			{ "WCL": "../intel-ci/xe.wcl.core.blocklist.txt" },
 			{ "all": "../intel-ci/xe.blocklist.txt" }
 		    ]
