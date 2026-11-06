@@ -6,6 +6,7 @@ igt@.*kms.*
 igt@testdisplay
 igt@xe_pat@display-vs-wb-transient
 igt@fbdev@.*
+igt@xe_pxp@.*display.*
 ##################################################################
 # Valid skip as test is applicable for Xe3p xpc and later platforms
 ##################################################################
