@@ -150,6 +150,8 @@ struct online_debug_data {
 		STEERING_CONTROL_END_LOOP,
 	} steering_control;
 	int debugger_detach_count;
+	int reopen_stages_released;
+	int reopen_final_bp_hits;
 };
 
 struct sip_arf_dump {
@@ -525,6 +527,13 @@ static bool intel_gen_per_context_eudebug(int fd)
 	return intel_gen(id) >= 35;
 }
 
+/* sync.host without an attached debugger kills the queue, so park threads between BPs */
+static bool reopen_uses_steering(struct online_debug_data *data)
+{
+	return (data->flags & SHADER_N_NOOP_BREAKPOINT) &&
+	       intel_gen_per_context_eudebug(data->drm_fd);
+}
+
 static void emit_e64b_read_page_fault(struct gpgpu_shader *shdr, uint64_t addr)
 {
 	igt_assert(shdr->gfx_ver >= 3500);
@@ -888,6 +897,11 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 		for (int i = 0; i < SHADER_LOOP_N; i++) {
 			gpgpu_shader__nop(shader);
 			gpgpu_shader__breakpoint(shader);
+			if (reopen_uses_steering(data) && i < SHADER_LOOP_N - 1) {
+				gpgpu_shader__label(shader, i);
+				gpgpu_shader__jump_neq(shader, i, w_dim.y + i,
+						       STEERING_END_LOOP);
+			}
 		}
 	} else if ((data->flags & SHADER_CACHING_SRAM) || (data->flags & SHADER_CACHING_VRAM)) {
 		uint32_t first_aip;
@@ -2382,6 +2396,35 @@ static uint64_t get_memory_region(int fd, uint64_t flags, int region_bitmask)
 	return vram_if_possible(fd, 0);
 }
 
+static void reopen_release_stages(struct xe_eudebug_client *c, int fd,
+				  struct intel_buf *buf)
+{
+	struct online_debug_data *data = c->data;
+	uint32_t row_dw = ALIGN(data->w_dim.x, data->w_dim.alignment);
+	uint32_t *ptr;
+
+	ptr = xe_bo_mmap_ext(fd, buf->handle, buf->size, PROT_WRITE);
+
+	for (int stage = 0; stage < SHADER_LOOP_N - 1; stage++) {
+		bool released = false;
+
+		igt_debug("Waiting for reopen stage %d to be released\n", stage);
+		igt_for_milliseconds(c->timeout_ms) {
+			pthread_mutex_lock(&data->mutex);
+			released = data->reopen_stages_released > stage;
+			pthread_mutex_unlock(&data->mutex);
+			if (released)
+				break;
+			usleep(10000);
+		}
+		igt_assert_f(released, "Debugger did not release reopen stage %d\n", stage);
+
+		WRITE_ONCE(ptr[(data->w_dim.y + stage) * row_dw], STEERING_END_LOOP);
+	}
+
+	munmap(ptr, buf->size);
+}
+
 static void run_online_client(struct xe_eudebug_client *c)
 {
 	int threads;
@@ -2429,6 +2472,8 @@ static void run_online_client(struct xe_eudebug_client *c)
 	/* Additional memory for steering control */
 	if (data->flags & SHADER_LOOP || data->flags & SHADER_SINGLE_STEP || data->flags & SHADER_PAGEFAULT)
 		s_dim.y++;
+	if (reopen_uses_steering(data))
+		s_dim.y += SHADER_LOOP_N - 1;
 	/* Additional memory for caching check */
 	if ((data->flags & SHADER_CACHING_SRAM) || (data->flags & SHADER_CACHING_VRAM))
 		s_dim.y += data->instruction_count;
@@ -2463,13 +2508,16 @@ static void run_online_client(struct xe_eudebug_client *c)
 
 	igt_nsec_elapsed(&ts);
 
-	if (data->steering_control == STEERING_CONTROL_LOOP)
+	if (data->steering_control == STEERING_CONTROL_LOOP || reopen_uses_steering(data))
 		shader->bb_sync = false;
 
 	gpgpu_shader_exec(ibb, buf, w_dim.x, w_dim.y, shader, sip, 0, 0);
 
 	gpgpu_shader_destroy(sip);
 	gpgpu_shader_destroy(shader);
+
+	if (reopen_uses_steering(data))
+		reopen_release_stages(c, fd, buf);
 
 	if (data->steering_control == STEERING_CONTROL_LOOP) {
 		uint32_t *steering;
@@ -4264,7 +4312,14 @@ static void eu_debugger_ndetach_trigger(struct xe_eudebug_debugger *d,
 	if (data->debugger_detach_count < (SHADER_LOOP_N - 1)) {
 		eu_debugger_detach_trigger(d, event);
 		data->debugger_detach_count++;
+
+		if (reopen_uses_steering(data)) {
+			pthread_mutex_lock(&data->mutex);
+			data->reopen_stages_released = data->debugger_detach_count;
+			pthread_mutex_unlock(&data->mutex);
+		}
 	} else {
+		data->reopen_final_bp_hits++;
 		igt_debug("Reached Nth breakpoint hence preventing the debugger detach\n");
 	}
 }
@@ -4305,6 +4360,12 @@ static void test_debugger_reopen(int fd, struct drm_xe_engine_class_instance *hw
 	xe_eudebug_session_run(s);
 
 	igt_assert_f(data->debugger_detach_count > 0, "Expected debugger to detach at least once\n");
+
+	if (reopen_uses_steering(data)) {
+		igt_assert_eq(data->debugger_detach_count, SHADER_LOOP_N - 1);
+		igt_assert_f(data->reopen_final_bp_hits > 0,
+			     "Last breakpoint not reported after reattach\n");
+	}
 
 	xe_eudebug_session_destroy(s);
 	online_debug_data_destroy(data);
