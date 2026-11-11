@@ -410,6 +410,10 @@ endif
 build_testplan = get_option('testplan')
 build_sphinx = get_option('sphinx')
 
+libnl = dependency('libnl-3.0', required : false)
+libnl_genl = dependency('libnl-genl-3.0', required : false)
+have_libnl = libnl.found() and libnl_genl.found()
+
 subdir('scripts')
 
 subdir('lib')

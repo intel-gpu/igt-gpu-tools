@@ -164,6 +164,11 @@ lib_deps = [
 	zlib
 ]
 
+if have_libnl
+        lib_sources += 'igt_drm_ras_nl.c'
+        lib_deps += [libnl, libnl_genl]
+endif
+
 inc = [ inc, include_directories('vendor') ]
 
 if libtsi.found()
