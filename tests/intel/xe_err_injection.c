@@ -21,6 +21,7 @@
 
 #include "igt.h"
 #include "lib/igt_drm_ras_nl.h"
+#include "lib/intel_chipset.h"
 #include "lib/intel_reg.h"
 #include "lib/intel_compute.h"
 
@@ -508,6 +509,14 @@ static void test_inject_core_compute_corr_error(struct xe_mmio *mmio, int fd,
 	cleanup_on_error(&ctx, fw_handle);
 }
 
+static void require_cri_gpu(int fd)
+{
+	uint16_t dev_id = xe_dev_id(fd);
+
+	igt_require_f(IS_CRESCENTISLAND(dev_id),
+		      "This test requires CRI GPU, but found device ID 0x%04x\n", dev_id);
+}
+
 enum xe_err_injection_type {
 	XE_CORE_COMPUTE_UNCORR_ERR_INJ,
 	XE_CORE_COMPUTE_UNCORR_ERR_INJ_POST_RECOVERY_WL,
@@ -548,6 +557,11 @@ int igt_main()
 		fd = drm_open_driver(DRIVER_XE);
 		igt_require_f(igt_debugfs_exists(fd, "forcewake_all", O_RDONLY),
 			      "forcewake_all is not available in debugfs\n");
+		require_cri_gpu(fd);
+		/*
+		 * TODO: Add firmware query for error injection support.
+		 * Should check: EOM (End of Manufacturing) status and error injection jumper state.
+		 */
 		xe_mmio_access_init(fd, &mmio);
 		igt_require_f(xe_mmio_is_initialized(&mmio),
 			      "Failed to initialize Xe MMIO access\n");
