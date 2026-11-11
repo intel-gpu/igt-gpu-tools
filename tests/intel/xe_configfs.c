@@ -25,6 +25,7 @@
 
 static char bus_addr[NAME_MAX];
 static struct pci_device *pci_dev;
+static char *snd_driver;
 
 static bool configfs_group_preexisting;
 
@@ -57,7 +58,7 @@ static void restore(int sig)
 {
 	int configfs_fd;
 
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 
 	/* Drop all custom configfs settings from subtests */
@@ -68,13 +69,17 @@ static void restore(int sig)
 
 	/* Bind again a clean driver with no custom settings */
 	igt_kmod_bind("xe", bus_addr);
+
+	igt_audio_driver_load(&snd_driver);
+	free(snd_driver);
+	snd_driver = NULL;
 }
 
 static void set_survivability_mode(int configfs_device_fd, bool value)
 {
 	int ret;
 
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 
 	ret = igt_kmod_unbind("xe", bus_addr);
 	igt_assert_f(!ret, "Failed to unbind xe from %s: %s\n",
@@ -129,7 +134,7 @@ static void test_engines_allowed_invalid(int configfs_device_fd)
 	 * These only test if engine parsing is correct, so just make sure
 	 * there's no device bound
 	 */
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -156,7 +161,7 @@ static void test_engines_allowed(int configfs_device_fd)
 	 * These only test if engine parsing is correct, so just make sure
 	 * there's no device bound
 	 */
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -187,7 +192,7 @@ static void test_gt_types_allowed(int configfs_device_fd)
 	 * These only test if gt type parsing is correct, so just make sure
 	 * there's no device bound
 	 */
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -254,7 +259,7 @@ static void test_ctx_restore_invalid(int configfs_device_fd, const char *type)
 	 * These only test if command parsing is correct,
 	 * so just make sure there's no device bound
 	 */
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
@@ -339,7 +344,7 @@ static void test_ctx_restore(int configfs_device_fd, const char *type,
 	for (size_t i = 0; i < ARRAY_SIZE(values); i++) {
 		const struct value *v = &values[i];
 
-		igt_audio_driver_unload(NULL);
+		igt_audio_driver_unload(&snd_driver);
 		igt_kmod_unbind("xe", bus_addr);
 
 		for (int j = 0, off = 0; v->in[j]; j++)
