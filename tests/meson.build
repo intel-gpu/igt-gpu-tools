@@ -371,6 +371,10 @@ if build_xe_eudebug
 	intel_xe_progs += intel_xe_eudebug_progs
 endif
 
+if have_libnl
+        intel_xe_progs += 'xe_err_injection'
+endif
+
 chamelium_progs = [
 	'kms_chamelium_audio',
 	'kms_chamelium_color',
