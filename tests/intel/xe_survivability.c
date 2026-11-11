@@ -39,6 +39,7 @@
  */
 
 static char bus_addr[NAME_MAX];
+static char *snd_driver;
 
 static bool configfs_group_preexisting;
 
@@ -160,7 +161,7 @@ static void restore(int sig)
 {
 	int configfs_fd;
 
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 
 	configfs_fd = igt_configfs_open("xe");
@@ -169,11 +170,15 @@ static void restore(int sig)
 	close(configfs_fd);
 
 	igt_kmod_bind("xe", bus_addr);
+
+	igt_audio_driver_load(&snd_driver);
+	free(snd_driver);
+	snd_driver = NULL;
 }
 
 static void set_survivability_mode(int configfs_device_fd, bool value)
 {
-	igt_audio_driver_unload(NULL);
+	igt_audio_driver_unload(&snd_driver);
 	igt_kmod_unbind("xe", bus_addr);
 	igt_sysfs_set_boolean(configfs_device_fd, "survivability_mode", value);
 	igt_kmod_bind("xe", bus_addr);
