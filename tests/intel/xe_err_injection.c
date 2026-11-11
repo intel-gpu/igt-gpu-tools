@@ -45,16 +45,28 @@
 #define XE_STEER_SEMAPHORE_MGSR_3D_VALUE 0x1
 
 /* Node types for error counters*/
+#define NODE_ID_CORRECTABLE_ERROR 0
 #define NODE_ID_UNCORRECTABLE_ERROR 1
 
 /* Error types for error counter */
 #define ERROR_ID_CORE_COMPUTE 1
+
+/* Core Compute Correctable error injection */
+#define XE_L2_BANK_ERR_INJ 0xB1B4
+#define XE_L2_BANK_DATA_1BIT_ERR_INJ_CONFIG 0xC000C
 
 enum {
 	SUCCESS = 1,
 	FAILED,
 	TIMEOUT,
 };
+
+#define INJ_ONCE 1
+#define INJ_MANY 16
+#define THRESHOLD_NONE 0
+#define THRESHOLD_ONE 1
+
+time_t event_timeout = 10 * 1000; /* 10 seconds */
 
 static bool run_xe_compute_on_all_engines(int fd, bool state)
 {
@@ -127,6 +139,12 @@ static void release_forcewake(int fw_handle)
 {
 	if (fw_handle >= 0)
 		close(fw_handle);
+}
+
+static void cleanup_on_error(struct igt_drm_ras_nl_context *ctx, int fw_handle)
+{
+	igt_drm_ras_nl_cleanup(ctx);
+	release_forcewake(fw_handle);
 }
 
 static int get_counter(uint32_t node_id, uint32_t error_id)
@@ -337,9 +355,165 @@ static void test_inject_core_compute_uncorr_error(struct xe_mmio *mmio, int fd)
 	uncorr_error_recovered = true;
 }
 
+static void inject_core_compute_corr_error(struct xe_mmio *mmio, int fd)
+{
+	/* Disable Multicast for unicast error injection */
+	acquire_steering_semaphore(mmio);
+	xe_mmio_write32(mmio, XE_MC_PKT_CTRL_MGSR_3D_ADDRESS, 0x0);
+
+	/* Arm the Injection */
+	xe_mmio_write32(mmio, XE_L2_BANK_ERR_INJ, XE_L2_BANK_DATA_1BIT_ERR_INJ_CONFIG);
+
+	/* Rollback to Multicast */
+	modify_reg_bit(mmio,
+		       XE_MC_PKT_CTRL_MGSR_3D_ADDRESS,
+		       XE_MC_PKT_CTRL_MGSR_3D_VALUE,
+		       true);
+	release_steering_semaphore(mmio);
+}
+
+/**
+ * SUBTEST: inject_core_compute_corr_error_threshold_one
+ * Description: Inject one Core Compute Correctable Error with the
+ *		threshold set to 1 and verify exceed-threshold reporting.
+ * Functionality: error injection
+ *
+ * SUBTEST: inject_core_compute_corr_error_threshold_default
+ * Description: Inject enough Core Compute Correctable Errors to cross
+ *		the current threshold and verify exceed-threshold reporting.
+ * Functionality: error injection
+ *
+ * SUBTEST: inject_core_compute_corr_error_once
+ * Description: Inject one Core Compute Correctable Error and verify the
+ *		error counter increments by 1.
+ * Functionality: error injection
+ */
+static void test_inject_core_compute_corr_error(struct xe_mmio *mmio, int fd,
+						uint32_t ntimes, uint32_t threshold,
+						bool check_event)
+{
+	uint32_t counter_before = 0, counter_after = 0;
+	uint32_t current_threshold = UINT32_MAX;
+	struct igt_drm_ras_nl_context ctx;
+	int fw_handle, ret;
+
+	fw_handle = acquire_forcewake(fd);
+
+	ret = igt_drm_ras_nl_init(&ctx);
+	if (ret < 0) {
+		release_forcewake(fw_handle);
+		igt_assert_f(false, "Failed to initialize netlink socket (ret=%d)\n", ret);
+	}
+
+	/** TODO
+	 *  Fetching node_id and error_id dynamically is pending to implement.
+	 *  For now, using
+	 *  node_id=0 (correctable_errors) and
+	 *  error_id=1 (core_compute)
+	 */
+	ctx.node_id = NODE_ID_CORRECTABLE_ERROR;
+	ctx.error_id = ERROR_ID_CORE_COMPUTE;
+
+	/* Query the error counter before injection */
+	counter_before = get_counter(ctx.node_id, ctx.error_id);
+	if (counter_before < 0) {
+		cleanup_on_error(&ctx, fw_handle);
+		igt_assert_f(false,
+			     "Failed to query Core Compute Correctable error counter before injection\n");
+	}
+
+	/* Query the current error threshold before injection */
+	ret = igt_drm_ras_nl_get_error_threshold(&ctx);
+	if (ret < 0) {
+		cleanup_on_error(&ctx, fw_handle);
+		igt_assert_f(false,
+			     "Failed to query Core Compute correctable error threshold before injection\n");
+	}
+	current_threshold = ctx.error_threshold;
+
+	if (threshold == THRESHOLD_NONE && ntimes != INJ_ONCE) {
+		/* set ntimes to current_threshold for injecting enough times to exceed threshold*/
+		ntimes = current_threshold;
+	}
+
+	if (threshold != THRESHOLD_NONE) {
+		/* Set the error threshold to the specified value */
+		ctx.error_threshold = threshold;
+		ret = igt_drm_ras_nl_set_error_threshold(&ctx);
+		if (ret < 0) {
+			cleanup_on_error(&ctx, fw_handle);
+			igt_assert_f(false, "Failed to set Core Compute correctable error threshold before injection\n");
+		}
+	}
+
+	if (check_event) {
+		/* Subscribe to error event */
+		ret = igt_drm_ras_nl_subscribe_error_report(&ctx, DRM_RAS_MCGRP_ERROR_REPORT);
+		if (ret < 0) {
+			cleanup_on_error(&ctx, fw_handle);
+			igt_assert_f(false, "Failed to subscribe to error event (ret=%d)\n", ret);
+		}
+	}
+
+	for (uint32_t i = 0; i < ntimes; i++) {
+		igt_debug("****** Injection iteration: %u ***********\n", i + 1);
+		inject_core_compute_corr_error(mmio, fd);
+	}
+
+	if (check_event) {
+		/* wait 10 secs for error report event */
+		ret = igt_drm_ras_nl_wait_for_error_report_event(&ctx, event_timeout);
+		if (ret == 0 && ctx.event_error_value >= ctx.error_threshold) {
+			igt_info("Success: Received error event notification from: "
+				 "group=%s node_id=%u error_id=%u error_value=%u match=%d\n",
+				 DRM_RAS_MCGRP_ERROR_REPORT, ctx.event_node_id, ctx.event_error_id,
+				 ctx.event_error_value, ctx.event_received);
+		} else {
+			if (threshold != THRESHOLD_NONE) {
+				/* restore threshold to original value before exit */
+				ctx.error_threshold = current_threshold;
+				igt_drm_ras_nl_set_error_threshold(&ctx);
+			}
+			cleanup_on_error(&ctx, fw_handle);
+			igt_assert_f(false,
+				     "Failed: NOT received error event notification from: "
+				     "group=%s node_id=%u error_id=%u error_value=%u match=%d\n",
+				     DRM_RAS_MCGRP_ERROR_REPORT, ctx.event_node_id,
+				     ctx.event_error_id, ctx.event_error_value,
+				     ctx.event_received);
+		}
+	}
+
+	if (threshold != THRESHOLD_NONE) {
+		/* restore Core Compute Correctable error threshold to original value */
+		ctx.error_threshold = current_threshold;
+		ret = igt_drm_ras_nl_set_error_threshold(&ctx);
+		if (ret < 0)
+			igt_warn("Failed to restore Core Compute Correctable threshold to original value\n");
+	}
+
+	ret = igt_drm_ras_nl_get_error_counter(&ctx);
+	if (ret < 0) {
+		cleanup_on_error(&ctx, fw_handle);
+		igt_assert_f(false,
+			     "Failed to query Core Compute Correctable error counter after injection\n");
+	}
+	counter_after = ctx.error_value;
+
+	igt_info("error counter: before injection=%u after injection=%u\n",
+		 counter_before, counter_after);
+	igt_assert_f(counter_after - counter_before == ntimes,
+		     "Core Compute Correctable error injection Failed\n");
+
+	cleanup_on_error(&ctx, fw_handle);
+}
+
 enum xe_err_injection_type {
 	XE_CORE_COMPUTE_UNCORR_ERR_INJ,
 	XE_CORE_COMPUTE_UNCORR_ERR_INJ_POST_RECOVERY_WL,
+	XE_CORE_COMPUTE_CORR_ERR_INJ_THRESHOLD_ONE,
+	XE_CORE_COMPUTE_CORR_ERR_INJ_THRESHOLD_DEFAULT,
+	XE_CORE_COMPUTE_CORR_ERR_INJ_ONCE,
 };
 
 static void inject_error(enum xe_err_injection_type injection, struct xe_mmio *mmio, int fd)
@@ -350,6 +524,15 @@ static void inject_error(enum xe_err_injection_type injection, struct xe_mmio *m
 		break;
 	case XE_CORE_COMPUTE_UNCORR_ERR_INJ_POST_RECOVERY_WL:
 		run_xe_compute_on_all_engines(fd, POST_RECOVERY_WL);
+		break;
+	case XE_CORE_COMPUTE_CORR_ERR_INJ_THRESHOLD_ONE:
+		test_inject_core_compute_corr_error(mmio, fd, INJ_ONCE, THRESHOLD_ONE, true);
+		break;
+	case XE_CORE_COMPUTE_CORR_ERR_INJ_THRESHOLD_DEFAULT:
+		test_inject_core_compute_corr_error(mmio, fd, INJ_MANY, THRESHOLD_NONE, true);
+		break;
+	case XE_CORE_COMPUTE_CORR_ERR_INJ_ONCE:
+		test_inject_core_compute_corr_error(mmio, fd, INJ_ONCE, THRESHOLD_NONE, false);
 		break;
 	default:
 		igt_info("Invalid Error Injection specified\n");
@@ -381,6 +564,21 @@ int igt_main()
 			inject_error(XE_CORE_COMPUTE_UNCORR_ERR_INJ_POST_RECOVERY_WL, &mmio, fd);
 		}
 	}
+
+	igt_describe("Inject one Core Compute Correctable Error with the "
+		     "threshold set to 1 and verify exceed-threshold reporting");
+	igt_subtest("inject_core_compute_corr_error_threshold_one")
+		inject_error(XE_CORE_COMPUTE_CORR_ERR_INJ_THRESHOLD_ONE, &mmio, fd);
+
+	igt_describe("Inject enough Core Compute Correctable Errors to cross"
+		     " the current threshold and verify exceed-threshold reporting");
+	igt_subtest("inject_core_compute_corr_error_threshold_default")
+		inject_error(XE_CORE_COMPUTE_CORR_ERR_INJ_THRESHOLD_DEFAULT, &mmio, fd);
+
+	igt_describe("Inject one Core Compute Correctable Error and verify the "
+		     "error counter increments by 1");
+	igt_subtest("inject_core_compute_corr_error_once")
+		inject_error(XE_CORE_COMPUTE_CORR_ERR_INJ_ONCE, &mmio, fd);
 
 	igt_fixture() {
 		xe_mmio_access_fini(&mmio);
