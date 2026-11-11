@@ -50,6 +50,7 @@ __attribute__((nonnull)) int igt_kmod_rebind(const char *mod_name,
 					     const char *pci_device);
 
 int igt_audio_driver_unload(char **whom);
+int igt_audio_driver_load(char **whom);
 
 int igt_intel_driver_load(const char *opts, const char *driver);
 int igt_intel_driver_unload(const char *driver);

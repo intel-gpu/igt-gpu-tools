@@ -31,6 +31,7 @@
 #define MAX_INJECTIONS_PER_ITER	100
 
 int32_t inject_iters_raw;
+static char *snd_driver;
 struct fault_injection_params {
 	/* @probability: Likelihood of failure injection, in percent. */
 	uint32_t probability;
@@ -195,6 +196,10 @@ static void setup_injection_fault(const struct fault_injection_params *fault_par
 
 static void cleanup_injection_fault(int sig)
 {
+	igt_audio_driver_load(&snd_driver);
+	free(snd_driver);
+	snd_driver = NULL;
+
 	injection_list_clear();
 }
 
@@ -311,7 +316,7 @@ static void probe_fail_guc(const char pci_slot[], const char function_name[],
 		fault_params->times = MAX_INJECTIONS_PER_ITER;
 		setup_injection_fault(fault_params);
 		inject_fault_probe(pci_slot, function_name);
-		igt_audio_driver_unload(NULL);
+		igt_audio_driver_unload(&snd_driver);
 		igt_kmod_unbind("xe", pci_slot);
 
 		/*
@@ -666,7 +671,7 @@ int igt_main_args("I:", NULL, help_str, opt_handler, NULL)
 	igt_fixture() {
 		close(sysfs);
 		drm_close_driver(fd);
-		igt_audio_driver_unload(NULL);
+		igt_audio_driver_unload(&snd_driver);
 		igt_kmod_unbind("xe", pci_slot);
 	}
 
@@ -678,7 +683,7 @@ int igt_main_args("I:", NULL, help_str, opt_handler, NULL)
 			err = inject_fault_probe(pci_slot, s->name);
 
 			igt_assert_eq(should_pass ? 0 : INJECT_ERRNO, err);
-			igt_audio_driver_unload(NULL);
+			igt_audio_driver_unload(&snd_driver);
 			igt_kmod_unbind("xe", pci_slot);
 		}
 

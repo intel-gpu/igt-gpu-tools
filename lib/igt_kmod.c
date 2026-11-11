@@ -557,6 +557,34 @@ int igt_audio_driver_unload(char **who)
 	return igt_always_unload_audio_driver(who);
 }
 
+/**
+ * igt_audio_driver_load:
+ * @who: Pointer to a string with the name of the audio driver to be
+ * (re)loaded, as previously filled in by igt_audio_driver_unload().
+ *
+ * Reloads the audio driver previously unloaded by igt_audio_driver_unload(),
+ * if any. This is a no-op if @who is NULL or points to NULL. The caller
+ * keeps ownership of @who; it is left untouched here, so the caller can
+ * free it (or call igt_audio_driver_unload() again) whenever it sees fit,
+ * typically on testcase cleanup.
+ *
+ * Returns: 0 in case of success or -errno in case the module could not
+ * be loaded.
+ */
+int igt_audio_driver_load(char **who)
+{
+	int ret;
+
+	if (!who || !*who)
+		return 0;
+
+	ret = igt_kmod_load(*who, NULL);
+	if (ret)
+		igt_warn("Could not load audio driver %s (%s)\n", *who, strerror(-ret));
+
+	return ret;
+}
+
 int __igt_intel_driver_unload(char **who, const char *driver)
 {
 	int ret;
