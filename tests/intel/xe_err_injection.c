@@ -274,6 +274,18 @@ static void print_aer_recovery_status(void)
 		igt_info("AER device recovery successful\n");
 }
 
+/* Dmesg regex to inform igt_runner not to treat the expected AER error messages as failures */
+static void ignore_aer_in_dmesg(void)
+{
+	const char *aer_msg = "AER: device recovery successful"
+			      "|AER: Root Port link has been reset"
+			      "|AER: Uncorrectable .Non-Fatal. error"
+			      "|error recovery"
+			      "|PCIe Bus Error: severity=Uncorrectable .Non-Fatal"
+			      "|SIGID=203";
+	igt_emit_ignore_dmesg_regex(aer_msg);
+}
+
 static bool uncorr_error_recovered;
 
 /**
@@ -311,6 +323,8 @@ static void test_inject_core_compute_uncorr_error(struct xe_mmio *mmio, int fd)
 		release_forcewake(fw_handle);
 		igt_assert_f(false, "Failed to read error counter before injection\n");
 	}
+
+	ignore_aer_in_dmesg();
 
 	if (!acquire_steering_semaphore(mmio)) {
 		release_forcewake(fw_handle);
