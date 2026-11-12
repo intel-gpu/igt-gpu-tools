@@ -97,3 +97,5 @@ igt@xe_compute@ccs-mode-compute-kernel
 igt@xe_mempage_offline@inject-single-page
 igt@xe_mempage_offline@inject-duplicate-page
 ##################################################################
+igt@xe_err_injection@.*
+##################################################################
