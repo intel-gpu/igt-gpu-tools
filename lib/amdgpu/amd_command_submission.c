@@ -47,13 +47,15 @@ int amdgpu_test_exec_cs_helper(amdgpu_device_handle device, unsigned int ip_type
 	bool user_queue = ring_context->user_queue;
 	const struct amdgpu_ip_block_version *ip_block = NULL;
 	amdgpu_bo_handle *all_res;
+	uint64_t ib_size;
 
 	ip_block = get_ip_block(device, ip_type);
 	all_res = alloca(sizeof(ring_context->resources[0]) * (ring_context->res_cnt + 1));
+	ib_size = (uint64_t)ring_context->pm4_size * sizeof(*ring_context->pm4);
 
 	if (expect_failure) {
 		/* allocate IB */
-		r = amdgpu_bo_alloc_and_map_sync(device, ring_context->write_length, 4096,
+		r = amdgpu_bo_alloc_and_map_sync(device, ib_size, 4096,
 						 AMDGPU_GEM_DOMAIN_GTT, 0, AMDGPU_VM_MTYPE_UC,
 						 &ib_result_handle, &ib_result_cpu,
 						 &ib_result_mc_address, &va_handle,
@@ -63,7 +65,7 @@ int amdgpu_test_exec_cs_helper(amdgpu_device_handle device, unsigned int ip_type
 		/* prepare CS */
 		igt_assert(ring_context->pm4_dw <= 1024);
 		/* allocate IB */
-		r = amdgpu_bo_alloc_and_map_sync(device, ring_context->write_length, 4096,
+		r = amdgpu_bo_alloc_and_map_sync(device, ib_size, 4096,
 						 AMDGPU_GEM_DOMAIN_GTT, 0, AMDGPU_VM_MTYPE_UC,
 						 &ib_result_handle, &ib_result_cpu,
 						 &ib_result_mc_address, &va_handle,
@@ -1257,8 +1259,11 @@ int cmd_place_packet(cmd_context_t *ctx, const cmd_packet_params_t *params)
 		if (!ctx->ip_block->funcs->write_linear)
 			return -ENOTSUP;
 
-		/* TODO: allow user set the dst and data */
-		//ctx->ring_ctx->bo_mc = params->dst_addr;
+		/* Destination operand comes from the caller. */
+		if (params->dst_addr)
+			ctx->ring_ctx->bo_mc = params->dst_addr;
+		igt_assert_f(ctx->ring_ctx->bo_mc,
+			     "WRITE_LINEAR requires a destination address\n");
 		ctx->ring_ctx->write_length = params->size;
 
 		/* Build PM4 packet */
@@ -1271,8 +1276,11 @@ int cmd_place_packet(cmd_context_t *ctx, const cmd_packet_params_t *params)
 		if (!ctx->ip_block->funcs->write_linear_atomic)
 			return -ENOTSUP;
 
-		/* TODO: allow user set the dst and data */
-		//ctx->ring_ctx->bo_mc = params->dst_addr;
+		/* Destination operand comes from the caller. */
+		if (params->dst_addr)
+			ctx->ring_ctx->bo_mc = params->dst_addr;
+		igt_assert_f(ctx->ring_ctx->bo_mc,
+			     "WRITE_ATOMIC requires a destination address\n");
 		ctx->ring_ctx->write_length = 1; /* Atomic operations typically work on single DWORD */
 
 		result = ctx->ip_block->funcs->write_linear_atomic(ctx->ip_block->funcs,
@@ -1281,18 +1289,24 @@ int cmd_place_packet(cmd_context_t *ctx, const cmd_packet_params_t *params)
 		return result;
 
 	case CMD_PACKET_COPY_LINEAR:
-	    if (!ctx->ip_block->funcs->copy_linear)
-		    return -ENOTSUP;
+		if (!ctx->ip_block->funcs->copy_linear)
+			return -ENOTSUP;
 
-	    /* For copy operations, we need both source and destination addresses */
-	    /* This would require extending the API to pass both addresses */
-	    /* For now, use the internal buffer as source */
-	    ctx->ring_ctx->write_length = params->size;
+		/* Copy takes both operands from the caller: bo_mc = source VA,
+		 * bo_mc2 = destination VA.
+		 */
+		if (params->src_addr)
+			ctx->ring_ctx->bo_mc = params->src_addr;
+		if (params->dst_addr)
+			ctx->ring_ctx->bo_mc2 = params->dst_addr;
+		igt_assert_f(ctx->ring_ctx->bo_mc && ctx->ring_ctx->bo_mc2,
+			     "COPY_LINEAR requires source and destination addresses\n");
+		ctx->ring_ctx->write_length = params->size;
 
-	    result = ctx->ip_block->funcs->copy_linear(ctx->ip_block->funcs,
-						      ctx->ring_ctx,
-						      &ctx->ring_ctx->pm4_dw);
-	    return result;
+		result = ctx->ip_block->funcs->copy_linear(ctx->ip_block->funcs,
+						   ctx->ring_ctx,
+						   &ctx->ring_ctx->pm4_dw);
+		return result;
 
 	case CMD_PACKET_COPY_ATOMIC:
 		/* TODO: Implement atomic copy if supported */
