@@ -706,7 +706,10 @@ static void memory_register_same_ptr(amdgpu_device_handle device)
  *  6. Verify buffer[dwLocation] == 0x5678.
  *
  * Notes:
- *  - Arcturus does not have a distinct FAMILY_AR constant in IGT; we approximate by requiring a GFX9 AI family (FAMILY_IS_AI) and non-APU.
+ *  - IGT has no FAMILY_AR family-id constant: AMDGPU_FAMILY_AI is shared by
+ *    Vega10/12/20/Arcturus/Aldebaran. Arcturus is identified precisely by chip
+ *    revision via ASICREV_IS(chip_external_rev, ARCTURUS), mirroring how
+ *    setup_amdgpu_ip_blocks() disambiguates the AI family.
  *  - Mapping uses AMDGPU_VM_MTYPE_RW to exercise RW mtype path.
  *  - We keep separate src/dst virtual addresses within the same BO.
  */
@@ -717,7 +720,7 @@ static void test_cache_invalidate_on_sdma_write_asm(amdgpu_device_handle device,
 	const uint32_t kPattern = 0x5678;
 	const int dwLocation = 100;
 	int r;
-	uint32_t version = 9; /* gfx version for dispatch helper */
+	uint32_t version; /* gfx version for dispatch helper */
 	char mcpu[32];
 	uint8_t isa_bin[4096];
 	size_t isa_sz = 0;
@@ -744,29 +747,23 @@ static void test_cache_invalidate_on_sdma_write_asm(amdgpu_device_handle device,
 	cmd_context_t *dma_ctx = NULL;
 	struct amdgpu_cs_fence fence;
 	uint32_t expired = 0;
+	struct drm_amdgpu_info_hw_ip hw_ip_info;
 
-	/* Gate: Approximate Arcturus requirement */
-	if (is_apu(gpu_info) || !FAMILY_IS_AI(gpu_info->family_id)) {
-		igt_skip("Skipping test: requires Arcturus (gfx9 AI discrete) family\n");
+	/* Gate: Arcturus-only feature (RW MTYPE, cache invalidate on SDMA write).
+	 * family_id (AI) is shared across Vega10/12/20/Arcturus/Aldebaran, so
+	 * disambiguate Arcturus by chip revision.
+	 */
+	if (!FAMILY_IS_AI(gpu_info->family_id) ||
+	    !ASICREV_IS(gpu_info->chip_external_rev, ARCTURUS)) {
+		igt_skip("Skipping test: requires Arcturus series asics (RW MTYPE)\n");
 		return;
 	}
 
 	/* Determine shader version similarly to other tests */
 	amdgpu_family_id_to_mcpu(gpu_info->family_id, mcpu, sizeof(mcpu));
-	if (FAMILY_IS_GFX1200(gpu_info->family_id))
-		version = 12;
-	else if (FAMILY_IS_GFX1150(gpu_info->family_id) ||
-		 FAMILY_IS_GFX1100(gpu_info->family_id) ||
-		 FAMILY_IS_GFX1036(gpu_info->family_id) ||
-		 FAMILY_IS_GFX1037(gpu_info->family_id) ||
-		 FAMILY_IS_YC(gpu_info->family_id) ||
-		 gpu_info->family_id == FAMILY_GFX1103)
-			version = 11;
-	else if (FAMILY_IS_AI(gpu_info->family_id) ||
-		 FAMILY_IS_RV(gpu_info->family_id) ||
-		 FAMILY_IS_NV(gpu_info->family_id) ||
-		gpu_info->family_id == FAMILY_VGH)
-			version = 10;
+	r = amdgpu_query_hw_ip_info(device, AMDGPU_HW_IP_COMPUTE, 0, &hw_ip_info);
+	igt_assert_eq(r, 0);
+	version = hw_ip_info.hw_ip_version_major;
 
 	/* 1. Allocate VRAM BO with RW MTYPE */
 	r = amdgpu_bo_alloc_and_map_sync(device,
@@ -903,7 +900,7 @@ static void test_cache_invalidate_on_cpu_write_asm(amdgpu_device_handle device,
 	const uint32_t kPattern = 0x5678;
 	const int dwLocation = 100;
 	int r;
-	uint32_t version = 9;
+	uint32_t version;
 	char mcpu[32];
 	uint8_t isa_bin[4096];
 	size_t isa_sz = 0;
@@ -930,10 +927,15 @@ static void test_cache_invalidate_on_cpu_write_asm(amdgpu_device_handle device,
 	struct amdgpu_cs_fence fence;
 	uint32_t expired = 0;
 	uint64_t cpu_accessible_vram = 0;
+	struct drm_amdgpu_info_hw_ip hw_ip_info;
 
-	/* Require Arcturus-like discrete (approximate) and large BAR (CPU accessible VRAM). */
-	if (is_apu(gpu_info) || !FAMILY_IS_AI(gpu_info->family_id)) {
-		igt_skip("Skipping test: requires Arcturus (gfx9 AI discrete) family\n");
+	/* Gate: Arcturus-only feature (RW MTYPE) plus large BAR (CPU accessible VRAM).
+	 * family_id (AI) is shared across Vega10/12/20/Arcturus/Aldebaran, so
+	 * disambiguate Arcturus by chip revision.
+	 */
+	if (!FAMILY_IS_AI(gpu_info->family_id) ||
+	    !ASICREV_IS(gpu_info->chip_external_rev, ARCTURUS)) {
+		igt_skip("Skipping test: requires Arcturus series asics (RW MTYPE)\n");
 		return;
 	}
 	/* Query memory info for CPU accessible VRAM */
@@ -944,20 +946,9 @@ static void test_cache_invalidate_on_cpu_write_asm(amdgpu_device_handle device,
 	}
 
 	amdgpu_family_id_to_mcpu(gpu_info->family_id, mcpu, sizeof(mcpu));
-	if (FAMILY_IS_GFX1200(gpu_info->family_id))
-		version = 12;
-	else if (FAMILY_IS_GFX1150(gpu_info->family_id) ||
-		 FAMILY_IS_GFX1100(gpu_info->family_id) ||
-		 FAMILY_IS_GFX1036(gpu_info->family_id) ||
-		 FAMILY_IS_GFX1037(gpu_info->family_id) ||
-		 FAMILY_IS_YC(gpu_info->family_id) ||
-		 gpu_info->family_id == FAMILY_GFX1103)
-			version = 11;
-	else if (FAMILY_IS_AI(gpu_info->family_id) ||
-		 FAMILY_IS_RV(gpu_info->family_id) ||
-		 FAMILY_IS_NV(gpu_info->family_id) ||
-		 gpu_info->family_id == FAMILY_VGH)
-			version = 10;
+	r = amdgpu_query_hw_ip_info(device, AMDGPU_HW_IP_COMPUTE, 0, &hw_ip_info);
+	igt_assert_eq(r, 0);
+	version = hw_ip_info.hw_ip_version_major;
 
 	/* Allocate host-accessible VRAM BO */
 	r = amdgpu_bo_alloc_and_map_sync(device,
@@ -1191,11 +1182,12 @@ static void memory_register(amdgpu_device_handle device)
 	char mcpu[32];
 	uint8_t isa_bin[4096];
 	size_t isa_sz = 0;
-	uint32_t version = 9;
+	uint32_t version;
 	void *ptr_shader = NULL;
 	pid_t pid;
 	int status;
 	bool buffer_busy;
+	struct drm_amdgpu_info_hw_ip hw_ip_info;
 
 	memset(&info, 0, sizeof(info));
 	page_sz = sysconf(_SC_PAGE_SIZE);
@@ -1256,21 +1248,10 @@ static void memory_register(amdgpu_device_handle device)
 	igt_assert_eq(r, 0);
 	amdgpu_family_id_to_mcpu(info.family_id, mcpu, sizeof(mcpu));
 
-    /* Determine GPU version */
-	if (FAMILY_IS_GFX1200(info.family_id))
-		version = 12;
-	else if (FAMILY_IS_GFX1150(info.family_id) ||
-	     FAMILY_IS_GFX1100(info.family_id) ||
-	     FAMILY_IS_GFX1036(info.family_id) ||
-	     FAMILY_IS_GFX1037(info.family_id) ||
-	     FAMILY_IS_YC(info.family_id) ||
-	     info.family_id == FAMILY_GFX1103)
-		version = 11;
-	else if (FAMILY_IS_AI(info.family_id) ||
-	     FAMILY_IS_RV(info.family_id) ||
-	     FAMILY_IS_NV(info.family_id) ||
-	     info.family_id == FAMILY_VGH)
-		version = 10;
+	/* Determine GPU version */
+	r = amdgpu_query_hw_ip_info(device, AMDGPU_HW_IP_COMPUTE, 0, &hw_ip_info);
+	igt_assert_eq(r, 0);
+	version = hw_ip_info.hw_ip_version_major;
 
 	r = amdgpu_llvm_asm_init();
 	if (r != 0) {
@@ -2843,7 +2824,8 @@ static int execute_shader_verification(amdgpu_device_handle device,
 	uint8_t isa_bin[4096];
 	size_t isa_sz = 0;
 	int r_asm;
-	uint32_t version = 9;
+	uint32_t version;
+	struct drm_amdgpu_info_hw_ip hw_ip_info;
 
 	amdgpu_bo_handle bo_shader1 = NULL, bo_shader2 = NULL;
 	void *ptr_shader1 = NULL, *ptr_shader2 = NULL;
@@ -2868,21 +2850,9 @@ static int execute_shader_verification(amdgpu_device_handle device,
 	}
 
 	/* Determine GPU version for register programming */
-	if (FAMILY_IS_GFX1200(info.family_id)) {
-		version = 12;
-	} else if (FAMILY_IS_GFX1150(info.family_id) ||
-	       FAMILY_IS_GFX1100(info.family_id) ||
-	       FAMILY_IS_GFX1036(info.family_id) ||
-	       FAMILY_IS_GFX1037(info.family_id) ||
-	       FAMILY_IS_YC(info.family_id) ||
-	       info.family_id == FAMILY_GFX1103) {
-		version = 11;
-	} else if (FAMILY_IS_AI(info.family_id) ||
-	       FAMILY_IS_RV(info.family_id) ||
-	       FAMILY_IS_NV(info.family_id) ||
-	       info.family_id == FAMILY_VGH) {
-		version = 10;
-	}
+	r_asm = amdgpu_query_hw_ip_info(device, AMDGPU_HW_IP_COMPUTE, 0, &hw_ip_info);
+	igt_assert_eq(r_asm, 0);
+	version = hw_ip_info.hw_ip_version_major;
 
 	igt_info("Using GPU version %u for family 0x%x\n", version, info.family_id);
 
@@ -3200,8 +3170,8 @@ static void test_signal_handling(amdgpu_device_handle device)
 		igt_info("Parent process starting memory mapping operations...\n");
 
 		/*
-		 * Create a DMA context; sys_bo is registered in its residency set
-		 * immediately before the submit below (residency is per-submit).
+		 * Create a DMA context and register sys_bo in its residency set;
+		 * the SDMA write target VA is passed per-packet below.
 		 */
 		dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false);
 		igt_assert_f(dma_ctx, "Failed to create DMA command submission context");

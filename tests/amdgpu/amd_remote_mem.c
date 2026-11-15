@@ -54,23 +54,13 @@ static int build_poll_shader(amdgpu_device_handle dev,
 	size_t isa_sz = 0;
 	char mcpu[32];
 	int r;
-	uint32_t version = 9;
+	uint32_t version;
+	struct drm_amdgpu_info_hw_ip hw_ip_info;
 
 	amdgpu_family_id_to_mcpu(info->family_id, mcpu, sizeof(mcpu));
-	if (FAMILY_IS_GFX1200(info->family_id))
-		version = 12;
-	else if (FAMILY_IS_GFX1150(info->family_id) ||
-		 FAMILY_IS_GFX1100(info->family_id) ||
-			FAMILY_IS_GFX1036(info->family_id) ||
-			FAMILY_IS_GFX1037(info->family_id) ||
-			FAMILY_IS_YC(info->family_id) ||
-			info->family_id == FAMILY_GFX1103)
-		version = 11;
-	else if (FAMILY_IS_AI(info->family_id) ||
-		 FAMILY_IS_RV(info->family_id) ||
-			FAMILY_IS_NV(info->family_id) ||
-			info->family_id == FAMILY_VGH)
-		version = 10;
+	r = amdgpu_query_hw_ip_info(dev, AMDGPU_HW_IP_COMPUTE, 0, &hw_ip_info);
+	igt_assert_eq(r, 0);
+	version = hw_ip_info.hw_ip_version_major;
 
 	r = amdgpu_llvm_asm_init();
 	if (r)
