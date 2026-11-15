@@ -138,6 +138,8 @@ sdma_ring_write_linear(const struct amdgpu_ip_funcs *func,
 		       uint32_t *pm4_dw)
 {
 	uint32_t i, j;
+	uint32_t fill = ring_context->write_data_valid ?
+			ring_context->write_data : func->deadbeaf;
 
 	i = 0;
 	j = 0;
@@ -165,7 +167,7 @@ sdma_ring_write_linear(const struct amdgpu_ip_funcs *func,
 		ring_context->pm4[i++] = 0;
 
 	while (j++ < ring_context->write_length / 4)
-		ring_context->pm4[i++] = func->deadbeaf;
+		ring_context->pm4[i++] = fill;
 
 	*pm4_dw = i;
 
@@ -268,20 +270,22 @@ sdma_ring_const_fill(const struct amdgpu_ip_funcs *func,
 		     uint32_t *pm4_dw)
 {
 	uint32_t i;
+	uint32_t fill = context->write_data_valid ?
+			context->write_data : func->deadbeaf;
 
 	i = 0;
 	if (func->family_id == AMDGPU_FAMILY_SI) {
 		context->pm4[i++] = SDMA_PACKET_SI(SDMA_OPCODE_CONSTANT_FILL_SI,
 						   0, 0, 0, context->write_length / 4);
 		context->pm4[i++] = lower_32_bits(context->bo_mc);
-		context->pm4[i++] = 0xdeadbeaf;
+		context->pm4[i++] = fill;
 		context->pm4[i++] = upper_32_bits(context->bo_mc) >> 16;
 	} else {
 		context->pm4[i++] = SDMA_PACKET(SDMA_OPCODE_CONSTANT_FILL, 0,
 						SDMA_CONSTANT_FILL_EXTRA_SIZE(2));
 		context->pm4[i++] = lower_32_bits(context->bo_mc);
 		context->pm4[i++] = upper_32_bits(context->bo_mc);
-		context->pm4[i++] = func->deadbeaf;
+		context->pm4[i++] = fill;
 
 		if (func->family_id >= AMDGPU_FAMILY_AI)
 			context->pm4[i++] = context->write_length - 1;
@@ -359,6 +363,8 @@ gfx_ring_write_linear(const struct amdgpu_ip_funcs *func,
 		      uint32_t *pm4_dw)
 {
 	uint32_t i, j;
+	uint32_t fill = ring_context->write_data_valid ?
+			ring_context->write_data : func->deadbeaf;
 
 	i = 0;
 	j = 0;
@@ -378,7 +384,7 @@ gfx_ring_write_linear(const struct amdgpu_ip_funcs *func,
 	ring_context->pm4[i++] = lower_32_bits(ring_context->bo_mc);
 	ring_context->pm4[i++] = upper_32_bits(ring_context->bo_mc);
 	while (j++ < ring_context->write_length / 4)
-		ring_context->pm4[i++] = func->deadbeaf;
+		ring_context->pm4[i++] = fill;
 
 	*pm4_dw = i;
 	if (ring_context->pm4_size > 0)
@@ -477,11 +483,13 @@ gfx_ring_const_fill(const struct amdgpu_ip_funcs *func,
 		     uint32_t *pm4_dw)
 {
 	uint32_t i;
+	uint32_t fill = ring_context->write_data_valid ?
+			ring_context->write_data : func->deadbeaf;
 
 	i = 0;
 	if (func->family_id == AMDGPU_FAMILY_SI) {
 		ring_context->pm4[i++] = PACKET3(PACKET3_DMA_DATA_SI, 4);
-		ring_context->pm4[i++] = func->deadbeaf;
+		ring_context->pm4[i++] = fill;
 		ring_context->pm4[i++] = PACKET3_DMA_DATA_SI_ENGINE(0) |
 					 PACKET3_DMA_DATA_SI_DST_SEL(0) |
 					 PACKET3_DMA_DATA_SI_SRC_SEL(2) |
@@ -495,7 +503,7 @@ gfx_ring_const_fill(const struct amdgpu_ip_funcs *func,
 					 PACKET3_DMA_DATA_DST_SEL(0) |
 					 PACKET3_DMA_DATA_SRC_SEL(2) |
 					 PACKET3_DMA_DATA_CP_SYNC;
-		ring_context->pm4[i++] = func->deadbeaf;
+		ring_context->pm4[i++] = fill;
 		ring_context->pm4[i++] = 0;
 		ring_context->pm4[i++] = lower_32_bits(ring_context->bo_mc);
 		ring_context->pm4[i++] = upper_32_bits(ring_context->bo_mc);

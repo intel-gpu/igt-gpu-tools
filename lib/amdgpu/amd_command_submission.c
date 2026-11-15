@@ -1119,6 +1119,8 @@ static void cmd_clear_packet_inputs(cmd_context_t *ctx)
 
 	rc->bo_mc = 0;
 	rc->bo_mc2 = 0;
+	rc->write_data = 0;
+	rc->write_data_valid = false;
 	rc->write_length = 0;
 
 	/* Drop the per-submit residency set. */
@@ -1243,6 +1245,38 @@ int cmd_submit_packet(cmd_context_t *ctx)
 	return 0;
 }
 
+static void cmd_assert_size_within_packet_limit(cmd_context_t *ctx, uint32_t size,
+						const char *op)
+{
+	struct amdgpu_dma_limits limits;
+	uint64_t max_bytes;
+
+	amdgpu_dma_limits_query(ctx->device, &limits);
+	max_bytes = amdgpu_dma_max_bytes(&limits, (unsigned int)ctx->ip_type);
+
+	igt_assert_f(size <= max_bytes,
+		     "%s size %u exceeds single-packet max %llu bytes for this IP; split the transfer\n",
+		     op, size, (unsigned long long)max_bytes);
+}
+
+/*
+ * WRITE_LINEAR inlines the payload directly into the PM4 stream as
+ * write_length/4 dwords (plus a small packet header), so its real limit is the
+ * PM4 buffer capacity, not the DMA engine's per-packet transfer maximum. Reject
+ * transfers whose inlined form would overrun pm4[] before the builder writes it.
+ */
+static void cmd_assert_inline_payload_fits(cmd_context_t *ctx, uint32_t size,
+					   const char *op)
+{
+	/* Upper bound on the header across the SDMA/GFX write_linear encodings. */
+	const uint32_t header_dw = 8;
+	uint64_t need_dw = (uint64_t)header_dw + (size / 4);
+
+	igt_assert_f(need_dw <= ctx->ring_ctx->pm4_size,
+		     "%s size %u needs %llu dw, exceeds PM4 buffer (%u dw); split the transfer\n",
+		     op, size, (unsigned long long)need_dw, ctx->ring_ctx->pm4_size);
+}
+
 int cmd_place_packet(cmd_context_t *ctx, const cmd_packet_params_t *params)
 {
 	int result = -EINVAL;
@@ -1264,7 +1298,10 @@ int cmd_place_packet(cmd_context_t *ctx, const cmd_packet_params_t *params)
 			ctx->ring_ctx->bo_mc = params->dst_addr;
 		igt_assert_f(ctx->ring_ctx->bo_mc,
 			     "WRITE_LINEAR requires a destination address\n");
+		cmd_assert_inline_payload_fits(ctx, params->size, "WRITE_LINEAR");
 		ctx->ring_ctx->write_length = params->size;
+		ctx->ring_ctx->write_data = params->data;
+		ctx->ring_ctx->write_data_valid = true;
 
 		/* Build PM4 packet */
 		result = ctx->ip_block->funcs->write_linear(ctx->ip_block->funcs,
@@ -1301,11 +1338,33 @@ int cmd_place_packet(cmd_context_t *ctx, const cmd_packet_params_t *params)
 			ctx->ring_ctx->bo_mc2 = params->dst_addr;
 		igt_assert_f(ctx->ring_ctx->bo_mc && ctx->ring_ctx->bo_mc2,
 			     "COPY_LINEAR requires source and destination addresses\n");
+		cmd_assert_size_within_packet_limit(ctx, params->size, "COPY_LINEAR");
 		ctx->ring_ctx->write_length = params->size;
 
 		result = ctx->ip_block->funcs->copy_linear(ctx->ip_block->funcs,
 						   ctx->ring_ctx,
 						   &ctx->ring_ctx->pm4_dw);
+		return result;
+
+	case CMD_PACKET_CONST_FILL:
+		if (!ctx->ip_block->funcs->const_fill)
+			return -ENOTSUP;
+
+		/* Destination operand comes from the caller; params->data is the
+		 * fill pattern written to every DWORD of the range.
+		 */
+		if (params->dst_addr)
+			ctx->ring_ctx->bo_mc = params->dst_addr;
+		igt_assert_f(ctx->ring_ctx->bo_mc,
+			     "CONST_FILL requires a destination address\n");
+		cmd_assert_size_within_packet_limit(ctx, params->size, "CONST_FILL");
+		ctx->ring_ctx->write_length = params->size;
+		ctx->ring_ctx->write_data = params->data;
+		ctx->ring_ctx->write_data_valid = true;
+
+		result = ctx->ip_block->funcs->const_fill(ctx->ip_block->funcs,
+							  ctx->ring_ctx,
+							  &ctx->ring_ctx->pm4_dw);
 		return result;
 
 	case CMD_PACKET_COPY_ATOMIC:
@@ -1368,6 +1427,21 @@ int cmd_submit_copy_linear(cmd_context_t *ctx, uint64_t src_addr, uint64_t dst_a
 		.src_addr = src_addr,
 		.dst_addr = dst_addr,
 		.size = size,
+	};
+
+	return cmd_place_and_submit_packet(ctx, &params);
+}
+
+/**
+ * Convenience function for constant fill
+ */
+int cmd_submit_const_fill(cmd_context_t *ctx, uint64_t dst_addr, uint32_t size, uint32_t data)
+{
+	cmd_packet_params_t params = {
+		.type = CMD_PACKET_CONST_FILL,
+		.dst_addr = dst_addr,
+		.size = size,
+		.data = data,
 	};
 
 	return cmd_place_and_submit_packet(ctx, &params);

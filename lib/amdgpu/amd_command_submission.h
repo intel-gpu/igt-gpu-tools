@@ -36,6 +36,7 @@ typedef enum {
     CMD_PACKET_WRITE_ATOMIC,
     CMD_PACKET_COPY_LINEAR,
     CMD_PACKET_COPY_ATOMIC,
+    CMD_PACKET_CONST_FILL,
     CMD_PACKET_FENCE,
     CMD_PACKET_TIMESTAMP,
 } cmd_packet_type_t;
@@ -195,6 +196,8 @@ int cmd_wait_completion(cmd_context_t *ctx);
 int cmd_submit_write_linear(cmd_context_t *ctx, uint64_t dst_addr, uint32_t size, uint32_t data);
 
 int cmd_submit_copy_linear(cmd_context_t *ctx, uint64_t src_addr, uint64_t dst_addr, uint32_t size);
+
+int cmd_submit_const_fill(cmd_context_t *ctx, uint64_t dst_addr, uint32_t size, uint32_t data);
 
 int cmd_submit_atomic(cmd_context_t *ctx, uint64_t dst_addr, uint32_t data);
 

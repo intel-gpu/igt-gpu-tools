@@ -322,6 +322,8 @@ struct amdgpu_ring_context {
 	 */
 	uint64_t write_length;
 	uint64_t write_length2; /* IN: transfer size in bytes, second packet */
+	uint32_t write_data;    /* IN: payload for write_linear/const_fill */
+	bool write_data_valid;  /* IN: use write_data; else IP deadbeaf pattern */
 	uint32_t *pm4;		/* INTERNAL: packet buffer (submitter-owned, builder fills) */
 	uint32_t pm4_size;	/* IN: capacity of pm4[] in dwords (required, non-zero) */
 	bool secure;		/* IN: secure or not */
