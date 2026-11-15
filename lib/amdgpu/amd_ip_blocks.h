@@ -287,26 +287,59 @@ struct drm_amdgpu_info_uq_fw_areas {
 	};
 };
 
-/* aux struct to hold misc parameters for convenience to maintain */
+/*
+ * struct amdgpu_ring_context - hand-off structure shared by the packet builder
+ * and submitter roles.
+ *
+ * Builder role: the ip_block->funcs PM4 callbacks declared in struct
+ *   amdgpu_ip_funcs (write_linear, copy_linear, const_fill, ...). A builder
+ *   reads only the IN fields, populates pm4[], and reports the produced length
+ *   in pm4_dw. It does not access the device, allocate buffer objects, or
+ *   submit.
+ *
+ * Submitter role: the caller that drives a builder. It populates the IN fields
+ *   required by the target packet type prior to invocation, then consumes the
+ *   OUT fields (pm4[]/pm4_dw) to perform the command submission.
+ *
+ * This structure is the sole interface between the two roles; each field is
+ * annotated with a direction:
+ *   IN       set by the submitter before invocation; read by the builder.
+ *   OUT      set by the builder; read by the submitter.
+ *   INTERNAL owned by the submitter; the builder populates its contents only.
+ */
 struct amdgpu_ring_context {
 
 	int ring_id; /* ring_id from amdgpu_query_hw_ip_info */
-	int res_cnt; /* num of bo in amdgpu_bo_handle resources[2] */
+	int res_cnt; /* IN: number of valid entries in resources[] */
 
-	uint64_t write_length;  /* transfer size in bytes */
-	uint64_t write_length2; /* transfer size in bytes, second packet */
-	uint32_t *pm4;		/* data of the packet */
-	uint32_t pm4_size;	/* max allocated packet size */
-	bool secure;		/* secure or not */
+	/*
+	 * IN: per-packet transfer size in bytes. The builder interprets it
+	 * per packet type:
+	 *   write_linear/atomic    - inlined as write_length/4 dwords into pm4[]
+	 *                            (grows pm4_dw; pm4_size must accommodate it);
+	 *   copy_linear/const_fill - HW DMA transfer data count;
+	 *   compare/compare_pattern - verification span (num_compare = write_length/div).
+	 */
+	uint64_t write_length;
+	uint64_t write_length2; /* IN: transfer size in bytes, second packet */
+	uint32_t *pm4;		/* INTERNAL: packet buffer (submitter-owned, builder fills) */
+	uint32_t pm4_size;	/* IN: capacity of pm4[] in dwords (required, non-zero) */
+	bool secure;		/* IN: secure or not */
 	uint32_t priority;	/* user queue priority */
 
-	uint64_t bo_mc;		/* GPU address of first buffer */
-	uint64_t bo_mc2;	/* GPU address for p4 packet */
+	/*
+	 * Operand GPU virtual addresses, assigned per packet type by the
+	 * submitter prior to builder invocation:
+	 *   WRITE/ATOMIC/FILL: bo_mc = destination VA
+	 *   COPY:              bo_mc = source VA, bo_mc2 = destination VA
+	 */
+	uint64_t bo_mc;		/* IN: GPU VA, primary operand (destination, or source for copy) */
+	uint64_t bo_mc2;	/* IN: GPU VA, secondary operand (destination for copy) */
 	uint64_t bo_mc3;	/* GPU address of second buffer */
 	uint64_t bo_mc4;	/* GPU address of second p4 packet */
 
-	uint32_t pm4_dw;	/* actual size of pm4 */
-	uint32_t pm4_dw2;	/* actual size of second pm4 */
+	uint32_t pm4_dw;	/* OUT: actual packet size in dwords */
+	uint32_t pm4_dw2;	/* OUT: actual size of second pm4 in dwords */
 
 	volatile uint32_t *bo_cpu;	/* cpu adddress of mapped GPU buf */
 	volatile uint32_t *bo2_cpu;	/* cpu adddress of mapped pm4 */
@@ -326,7 +359,7 @@ struct amdgpu_ring_context {
 	amdgpu_context_handle context_handle;
 	struct drm_amdgpu_info_hw_ip hw_ip_info;  /* result of amdgpu_query_hw_ip_info */
 
-	amdgpu_bo_handle resources[4]; /* amdgpu_bo_alloc_and_map */
+	amdgpu_bo_handle resources[4]; /* IN: bo_list residency set, maintained by the submitter */
 	amdgpu_va_handle va_handle;    /* amdgpu_bo_alloc_and_map */
 	amdgpu_va_handle va_handle2;   /* amdgpu_bo_alloc_and_map */
 	amdgpu_va_handle va_handle3;   /* amdgpu_bo_alloc_and_map */
