@@ -121,9 +121,7 @@ static void test_fence_outlives_module(int vgem, int amd_fd,
 	igt_assert_eq(r, 0);
 
 	/* Create SDMA command context */
-	cmd_ctx = cmd_context_create(dev, AMD_IP_DMA, 0, false,
-				     copy_size, src_bo, src_mc,
-				     (volatile uint32_t *)src_cpu);
+	cmd_ctx = cmd_context_create(dev, AMD_IP_DMA, 0, false);
 	igt_assert(cmd_ctx != NULL);
 
 	/*
@@ -138,17 +136,14 @@ static void test_fence_outlives_module(int vgem, int amd_fd,
 			     AMDGPU_VA_OP_MAP);
 	igt_assert_eq(r, 0);
 
-	/* Set up bo_list: IB (src), dst, imported VGEM BO */
-	cmd_ctx->ring_ctx->bo2 = dst_bo;
-	cmd_ctx->ring_ctx->bo_mc2 = dst_mc;
-	cmd_ctx->ring_ctx->resources[1] = dst_bo;
-	cmd_ctx->ring_ctx->resources[2] = import.buf_handle;
-	cmd_ctx->ring_ctx->res_cnt = 3;
-
 	igt_info("Submitting %d x %llu-byte SDMA copies (no wait)...\n",
 		 NUM_SDMA_COPIES, (unsigned long long)copy_size);
 
 	for (i = 0; i < NUM_SDMA_COPIES; i++) {
+		igt_assert_eq(cmd_context_add_resource(cmd_ctx, src_bo), 0);
+		igt_assert_eq(cmd_context_add_resource(cmd_ctx, dst_bo), 0);
+		igt_assert_eq(cmd_context_add_resource(cmd_ctx, import.buf_handle), 0);
+
 		r = cmd_submit_copy_linear(cmd_ctx,
 					   src_mc, dst_mc,
 					   (uint32_t)copy_size);

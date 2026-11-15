@@ -850,8 +850,9 @@ static void test_cache_invalidate_on_sdma_write_asm(amdgpu_device_handle device,
 
 	/* 5. Issue SDMA write to buffer[0] while shader is polling */
 	if (cmd_ring_available(device, AMD_IP_DMA, 0, false))
-		dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false, 64, NULL, 0, NULL);
+		dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false);
 	igt_assert(dma_ctx);
+	igt_assert_eq(cmd_context_add_resource(dma_ctx, bo_vram), 0);
 	r = cmd_submit_write_linear(dma_ctx, vram_mc, sizeof(uint32_t), kPattern);
 	igt_assert_eq(r, 0);
 	r = cmd_wait_completion(dma_ctx);
@@ -875,7 +876,7 @@ static void test_cache_invalidate_on_sdma_write_asm(amdgpu_device_handle device,
 	igt_info("cache-invalidate-sdma-write: PASSED (dst[100]=0x%x)\n", buf[dwLocation]);
 
 	/* Cleanup */
-	cmd_context_destroy(dma_ctx, false);
+	cmd_context_destroy(dma_ctx);
 	amdgpu_bo_list_destroy(bo_list);
 	amdgpu_bo_unmap_and_free(bo_cmd, va_cmd, mc_cmd, 4096);
 	amdgpu_cs_ctx_free(compute_ctx);
@@ -1905,6 +1906,11 @@ typedef struct {
 
     /* Single DMA command context for ring 0 */
     cmd_context_t *dma_ctx;
+
+    /* Scratch BO used as the destination of interleaved DMA writes */
+    amdgpu_bo_handle dma_scratch_bo;
+    uint64_t dma_scratch_mc;
+    amdgpu_va_handle dma_scratch_va;
 } mm_bench_context_t;
 
 /**
@@ -1912,6 +1918,9 @@ typedef struct {
  */
 static int init_dma_context(mm_bench_context_t *ctx, amdgpu_device_handle device)
 {
+	void *scratch_cpu;
+	int r;
+
 	/* Check if DMA ring 0 is available */
 	if (!cmd_ring_available(device, AMD_IP_DMA, 0, false)) {
 		igt_debug("DMA ring 0 is not available\n");
@@ -1919,10 +1928,21 @@ static int init_dma_context(mm_bench_context_t *ctx, amdgpu_device_handle device
 	}
 
 	/* Create DMA context for ring 0 */
-	ctx->dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false, 128, NULL, 0, NULL);
+	ctx->dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false);
 	if (!ctx->dma_ctx) {
 		igt_debug("Failed to create DMA context for ring 0\n");
 		return -ENODEV;
+	}
+
+	r = amdgpu_bo_alloc_and_map(device, 4096, 4096,
+				    AMDGPU_GEM_DOMAIN_GTT, 0,
+				    &ctx->dma_scratch_bo, &scratch_cpu,
+				    &ctx->dma_scratch_mc, &ctx->dma_scratch_va);
+	if (r) {
+		igt_debug("Failed to allocate DMA scratch BO: %d\n", r);
+		cmd_context_destroy(ctx->dma_ctx);
+		ctx->dma_ctx = NULL;
+		return r;
 	}
 
 	igt_debug("Initialized DMA ring 0 successfully\n");
@@ -1935,8 +1955,14 @@ static int init_dma_context(mm_bench_context_t *ctx, amdgpu_device_handle device
 static void cleanup_dma_context(mm_bench_context_t *ctx)
 {
 	if (ctx->dma_ctx) {
-		cmd_context_destroy(ctx->dma_ctx, false);
+		cmd_context_destroy(ctx->dma_ctx);
 		ctx->dma_ctx = NULL;
+	}
+
+	if (ctx->dma_scratch_bo) {
+		amdgpu_bo_unmap_and_free(ctx->dma_scratch_bo, ctx->dma_scratch_va,
+					 ctx->dma_scratch_mc, 4096);
+		ctx->dma_scratch_bo = NULL;
 	}
 }
 
@@ -1957,9 +1983,18 @@ static int submit_dma_write_operation(mm_bench_context_t *ctx)
 		return -EINVAL;
 	}
 
+	/* Register the destination BO in the per-submit residency set, then
+	 * write into the scratch buffer it backs.
+	 */
+	r = cmd_context_add_resource(ctx->dma_ctx, ctx->dma_scratch_bo);
+	if (r) {
+		igt_debug("cmd_context_add_resource failed: %d\n", r);
+		return r;
+	}
+
 	/* Use the convenience function for write linear operation */
 	r = cmd_submit_write_linear(ctx->dma_ctx,
-				ctx->dma_ctx->ring_ctx->bo_mc,
+				ctx->dma_scratch_mc,
 			       64, 0x12345678);
 
 	if (r) {
@@ -3164,10 +3199,11 @@ static void test_signal_handling(amdgpu_device_handle device)
 		/* Parent process - perform memory operations with signal handling */
 		igt_info("Parent process starting memory mapping operations...\n");
 
-		/* FIX: Use cmd_context_create_ex with the same BO for both internal buffer and target */
-		/* This ensures SDMA writes to the correct memory address */
-		dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false, 128,
-				     sys_bo, sys_mc_address, (volatile uint32_t *)sys_cpu_ptr);
+		/*
+		 * Create a DMA context; sys_bo is registered in its residency set
+		 * immediately before the submit below (residency is per-submit).
+		 */
+		dma_ctx = cmd_context_create(device, AMD_IP_DMA, 0, false);
 		igt_assert_f(dma_ctx, "Failed to create DMA command submission context");
 
 		/* Wait for child process to complete with proper signal handling */
@@ -3215,6 +3251,7 @@ static void test_signal_handling(amdgpu_device_handle device)
 		igt_info("Writing 0xdeadbeaf to address 0x%" PRIx64 "\n", sys_mc_address);
 
 		/* Now SDMA should write to the correct address since we're using the same BO */
+		igt_assert_eq(cmd_context_add_resource(dma_ctx, sys_bo), 0);
 		r = cmd_submit_write_linear(dma_ctx, sys_mc_address, sizeof(uint32_t), 0xdeadbeaf);
 		igt_info("cmd_submit_write_linear returned: %d\n", r);
 		igt_assert_eq(r, 0);
@@ -3244,8 +3281,8 @@ static void test_signal_handling(amdgpu_device_handle device)
 
 		igt_info("Memory successfully updated to: 0x%08x\n", sys_mem[0]);
 
-		/* Cleanup command context - don't destroy the external BO */
-		cmd_context_destroy(dma_ctx, false);
+		/* Cleanup command context; sys_bo is owned by the caller. */
+		cmd_context_destroy(dma_ctx);
 		dma_ctx = NULL;
 	}
 
