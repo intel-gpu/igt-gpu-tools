@@ -2802,111 +2802,73 @@ cleanup_vram:
 /**
  * execute_shader_verification - Execute GPU verification of ptrace results
  * @device: AMDGPU device handle
+ * @vram_bo: VRAM buffer BO (source of the copies)
  * @vram_mc_addr: VRAM buffer GPU address
  * @vram_offset: Offset within VRAM buffer to test words
  * @expected_value1: Expected value for first word (word_before)
  * @expected_value2: Expected value for second word (word_after)
  *
- * This function assembles the shader code and executes two independent compute
- * dispatches to verify that the ptrace-modified values are visible to the GPU.
- * Each dispatch uses completely separate resources to ensure clean state.
+ * This function dispatches a CopyDword compute shader twice to read back the
+ * two ptrace-modified words from VRAM into a CPU-visible buffer, and verifies
+ * that each readback matches the expected value. The shared destination buffer
+ * is re-zeroed before each dispatch so a stale value cannot make the second
+ * check pass, keeping the two checks independent.
  *
  * Returns: 0 on success, -1 on failure
  */
 static int execute_shader_verification(amdgpu_device_handle device,
+				       amdgpu_bo_handle vram_bo,
 				       uint64_t vram_mc_addr,
-				      uint64_t vram_offset,
-				      uint32_t expected_value1,
-				      uint32_t expected_value2)
+				       uint64_t vram_offset,
+				       uint32_t expected_value1,
+				       uint32_t expected_value2)
 {
-	struct amdgpu_gpu_info info = {0};
-	char mcpu[32];
-	uint8_t isa_bin[4096];
-	size_t isa_sz = 0;
-	int r_asm;
-	uint32_t version;
-	struct drm_amdgpu_info_hw_ip hw_ip_info;
-
-	amdgpu_bo_handle bo_shader1 = NULL, bo_shader2 = NULL;
-	void *ptr_shader1 = NULL, *ptr_shader2 = NULL;
-	uint64_t mc_shader1 = 0, mc_shader2 = 0;
-	amdgpu_va_handle va_shader1 = 0, va_shader2 = 0;
+	const uint64_t src1 = vram_mc_addr + vram_offset;
+	const uint64_t src2 = vram_mc_addr + vram_offset + sizeof(uint64_t);
+	amdgpu_bo_handle bo_dst = NULL;
+	volatile uint32_t *ptr_dst = NULL;
+	uint64_t mc_dst = 0;
+	amdgpu_va_handle va_dst = 0;
 	int ret = 0;
 
-	/* Query GPU information for architecture-specific setup */
-	if (amdgpu_query_gpu_info(device, &info) != 0) {
-		igt_info("Query GPU info failed\n");
+	if (amdgpu_bo_alloc_and_map(device, 4096, 4096,
+				AMDGPU_GEM_DOMAIN_GTT, 0,
+				&bo_dst, (void **)&ptr_dst, &mc_dst, &va_dst) != 0) {
+		igt_info("Failed to allocate destination buffer\n");
 		return -1;
 	}
-
-	amdgpu_family_id_to_mcpu(info.family_id, mcpu, sizeof(mcpu));
-	igt_info("Assembling shader for architecture: %s\n", mcpu);
-
-	/* Assemble shader code */
-	r_asm = amdgpu_llvm_assemble(mcpu, CopyDwordIsa, isa_bin, sizeof(isa_bin), &isa_sz);
-	if (r_asm != 0 || isa_sz == 0) {
-		igt_info("Shader assembly failed (error=%d, size=%zu)\n", r_asm, isa_sz);
-		return -1;
-	}
-
-	/* Determine GPU version for register programming */
-	r_asm = amdgpu_query_hw_ip_info(device, AMDGPU_HW_IP_COMPUTE, 0, &hw_ip_info);
-	igt_assert_eq(r_asm, 0);
-	version = hw_ip_info.hw_ip_version_major;
-
-	igt_info("Using GPU version %u for family 0x%x\n", version, info.family_id);
 
 	/* First dispatch - verify word_before value */
 	igt_info("=== First dispatch: reading word_before ===\n");
-
-	/* Allocate separate shader buffer for first dispatch */
-	if (amdgpu_bo_alloc_and_map(device, 4096, 4096,
-				AMDGPU_GEM_DOMAIN_VRAM, 0,
-				&bo_shader1, &ptr_shader1, &mc_shader1, &va_shader1) != 0) {
-		igt_info("Failed to allocate first shader buffer\n");
-		return -1;
-	}
-	memset(ptr_shader1, 0, 4096);
-	memcpy(ptr_shader1, isa_bin, isa_sz);
-
-	if (execute_compute_dispatch(device, version, mc_shader1,
-				 vram_mc_addr + vram_offset,
-				0, /* dst allocated in helper */
-				expected_value1) != 0) {
+	*ptr_dst = 0;
+	if (amdgpu_compute_copy_dword(device, vram_bo, src1, bo_dst, mc_dst) != 0) {
 		igt_info("First dispatch failed\n");
 		ret = -1;
+		goto out;
 	}
-
-	amdgpu_bo_unmap_and_free(bo_shader1, va_shader1, mc_shader1, 4096);
-
-	/* Only proceed if first dispatch succeeded */
-	if (ret != 0) {
-		return ret;
+	if (*ptr_dst != expected_value1) {
+		igt_info("First result mismatch: got 0x%x, expected 0x%x\n",
+			 *ptr_dst, expected_value1);
+		ret = -1;
+		goto out;
 	}
 
 	/* Second dispatch - verify word_after value */
 	igt_info("=== Second dispatch: reading word_after ===\n");
-
-	/* Allocate separate shader buffer for second dispatch */
-	if (amdgpu_bo_alloc_and_map(device, 4096, 4096,
-				AMDGPU_GEM_DOMAIN_VRAM, 0,
-				&bo_shader2, &ptr_shader2, &mc_shader2, &va_shader2) != 0) {
-		igt_info("Failed to allocate second shader buffer\n");
-		return -1;
-	}
-	memset(ptr_shader2, 0, 4096);
-	memcpy(ptr_shader2, isa_bin, isa_sz);
-
-	if (execute_compute_dispatch(device, version, mc_shader2,
-				 vram_mc_addr + vram_offset + sizeof(uint64_t),
-				0, /* dst allocated in helper */
-				expected_value2) != 0) {
+	*ptr_dst = 0;
+	if (amdgpu_compute_copy_dword(device, vram_bo, src2, bo_dst, mc_dst) != 0) {
 		igt_info("Second dispatch failed\n");
+		ret = -1;
+		goto out;
+	}
+	if (*ptr_dst != expected_value2) {
+		igt_info("Second result mismatch: got 0x%x, expected 0x%x\n",
+			 *ptr_dst, expected_value2);
 		ret = -1;
 	}
 
-	amdgpu_bo_unmap_and_free(bo_shader2, va_shader2, mc_shader2, 4096);
-
+out:
+	amdgpu_bo_unmap_and_free(bo_dst, va_dst, mc_dst, 4096);
 	return ret;
 }
 
@@ -3051,19 +3013,12 @@ static void ptrace_access_invisible_vram_test(amdgpu_device_handle device)
 		igt_assert_eq(*word_after,  original0);
 		igt_info("CPU verification passed. Attempting shader readback...\n");
 
-		/* GPU verification using refactored helper functions */
-		if (amdgpu_llvm_asm_init() == 0) {
-			if (execute_shader_verification(device, mc_address_vram, VRAM_OFFSET,
-							(uint32_t)original1, (uint32_t)original0) == 0) {
-				igt_info("GPU shader verification passed\n");
-			} else {
-				igt_info("GPU shader verification failed\n");
-				/* Continue test execution even if GPU verification fails */
-			}
-
-			amdgpu_llvm_asm_shutdown();
+		if (execute_shader_verification(device, vram_bo, mc_address_vram, VRAM_OFFSET,
+						(uint32_t)original1, (uint32_t)original0) == 0) {
+			igt_info("GPU shader verification passed\n");
 		} else {
-		    igt_info("LLVM assembler unavailable; skipping shader verification.\n");
+			igt_info("GPU shader verification failed\n");
+			/* Continue test execution even if GPU verification fails */
 		}
 
 		igt_info("ptrace-access-invisible-vram test: PASSED\n");
