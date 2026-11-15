@@ -132,9 +132,15 @@ static int kfd_get_gpuvm_base(int fd, uint32_t gpu_id,
 	struct kfd_ioctl_get_process_apertures_new_args args = {};
 	uint32_t i;
 
+	if (ioctl(fd, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args))
+		return -errno;
+	if (args.num_of_nodes == 0)
+		return -ENODEV;
+	if (args.num_of_nodes > NUM_OF_SUPPORTED_GPUS)
+		args.num_of_nodes = NUM_OF_SUPPORTED_GPUS;
+
 	args.kfd_process_device_apertures_ptr =
 		(uint64_t)(uintptr_t)aps;
-	args.num_of_nodes = NUM_OF_SUPPORTED_GPUS;
 	if (ioctl(fd, AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &args))
 		return -errno;
 
