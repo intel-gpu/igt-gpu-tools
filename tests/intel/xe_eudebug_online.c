@@ -261,17 +261,17 @@ static struct gpgpu_shader *get_shader(struct online_debug_data *data)
 		else if (data->flags & SHADER_PAGEFAULT_ONE_OF_MANY)
 			emit_iga64_code(shader, pagefault_one_of_many, R"(
 #if GFX_VER >= 2000
-	// prepare load descriptor for page-faulting address
-	mov (8) r30.0<1>:uq 0x0:uq
-	mov (1) r30.0<1>:uq 0x12345678000:uq // PF address
-	mov (1) r30.2<1>:ud 0x3f:ud
-	mov (1) r30.4<1>:ud 0x3f:ud
-	mov (1) r30.7<1>:ud 0x3:ud // 4 bytes
-	// calculate thread id: r20.0 = dim.x * tgid.y + tgid.x
-	mad (1) r20.0<1>:ud r0.1<0;0>:ud r0.6<0;0>:ud r1.4<0>:ud
-	// page-fault only for arbitrary thread
-	cmp (1) (eq)f0.0 null<1>:ud r20.0<0;1,0>:ud ARG(0):ud
-(f0.0)	send.ugm (1) r31 r30 null 0x0 0x2128403 // load_block2d.ugm.d32t.a64.uc.uc
+// prepare load descriptor for page-faulting address
+	mov(8)		r30.0:uq	0x0:uq
+	mov(1)		r30.0:uq	0x12345678000:uq	//		PF	address
+	mov(1)		r30.2:ud	0x3f:ud
+	mov(1)		r30.4:ud	0x3f:ud
+	mov(1)		r30.7:ud	0x3:ud			//		4	bytes
+// calculate thread id: r20.0 = dim.x * tgid.y + tgid.x
+	mad(1)		r20.0:ud	r0.1<0;0>:ud		r0.6<0;0>:ud	r1.4<0>:ud
+// page-fault only for arbitrary thread
+	cmp(1)(eq)f0.0	null:ud		r20.0:ud		ARG(0):ud
+(f0.0)	send.ugm(1)	r31		r30			null		0x0	0x2128403	//	load_block2d.ugm.d32t.a64.uc.uc
 #endif
 			)", data->pf_thread_number);
 
@@ -297,7 +297,7 @@ static struct gpgpu_shader *get_sip(struct online_debug_data *data)
 	else
 		emit_iga64_code(sip, store_sr0_0, R"(
 #if GFX_VER >= 2000
-	mov (1) r5.0<1>:ud sr0.0:ud
+	mov(1)		r5.0:ud		sr0.0:ud
 	SET_THREAD_SPACE_ADDR(r4, 0, 0:ud, 4)
 	STORE_SPACE_DW(r4, r5)
 #endif
