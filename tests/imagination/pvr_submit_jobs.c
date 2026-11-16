@@ -52,7 +52,10 @@ static uint32_t init_compute_cmd_stream(int fd, uint32_t vm_ctx,
 	void *cdm_stream_map;
 	uint32_t stream_length;
 
-	struct igt_pvr_allocation *cdm_stream_alloc = igt_pvr_allocate_general(fd, vm_ctx, 0x1000);
+	struct igt_pvr_allocation *cdm_stream_alloc =
+		igt_pvr_allocate_general(fd, vm_ctx, 0x1000,
+				         DRM_PVR_BO_ALLOW_CPU_USERSPACE_ACCESS |
+				         DRM_PVR_BO_BYPASS_DEVICE_CACHE);
 
 	cdm_stream_gpu_addr = igt_pvr_get_gpu_addr(cdm_stream_alloc);
 
@@ -212,14 +215,18 @@ int igt_main()
 		pds_buffer_base[0x20] = pds_inst_encode_halt();
 
 		vdm_alloc =
-			igt_pvr_allocate_general(fd, render_vm_ctx_handle, size);
+			igt_pvr_allocate_general(fd, render_vm_ctx_handle, size,
+						 DRM_PVR_BO_ALLOW_CPU_USERSPACE_ACCESS |
+						 DRM_PVR_BO_BYPASS_DEVICE_CACHE);
 
 		vdm_buffer = igt_pvr_get_cpu_addr(fd, vdm_alloc);
 
 		size = PVR_BO_SIZE;
 
 		ppp_alloc =
-			igt_pvr_allocate_general(fd, render_vm_ctx_handle, size);
+			igt_pvr_allocate_general(fd, render_vm_ctx_handle, size,
+						 DRM_PVR_BO_ALLOW_CPU_USERSPACE_ACCESS |
+						 DRM_PVR_BO_BYPASS_DEVICE_CACHE);
 
 		ppp_buffer_base = igt_pvr_get_cpu_addr(fd, ppp_alloc);
 

@@ -67,7 +67,8 @@ struct igt_pvr_allocation *igt_pvr_allocate_addr(int fd, uint32_t vm_ctx, size_t
 						 uint64_t flags, uint64_t gpu_addr);
 struct igt_pvr_allocation *igt_pvr_allocate(int fd, uint32_t vm_ctx, size_t size, uint64_t flags,
 					    uint32_t heap_index);
-struct igt_pvr_allocation *igt_pvr_allocate_general(int fd, uint32_t vm_ctx, size_t size);
+struct igt_pvr_allocation *igt_pvr_allocate_general(int fd, uint32_t vm_ctx, size_t size,
+					    uint64_t flags);
 void *igt_pvr_get_cpu_addr(int fd, struct igt_pvr_allocation *alloc);
 uint64_t igt_pvr_get_gpu_addr(struct igt_pvr_allocation *alloc);
 size_t igt_pvr_get_size(struct igt_pvr_allocation *alloc);
