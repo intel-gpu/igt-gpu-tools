@@ -28,6 +28,10 @@ int igt_main()
 		fd = drm_open_driver(DRIVER_POWERVR);
 	}
 
+	/***********************************************************************
+	   DRM_PVR_DEV_QUERY_HEAP_INFO_GET
+	 ***********************************************************************/
+
 	igt_describe("Test getting the size of an array from the kernel");
 	igt_subtest("heap-info-get-size")
 	{
@@ -123,6 +127,309 @@ int igt_main()
 		free(heaps);
 	}
 
+/* Value of stride and count as defined in the first released version of the UAPI. */
+#define LEGACY_STRIDE (offsetof(struct drm_pvr_heap, page_size_log2) + sizeof(heaps->page_size_log2))
+#define LEGACY_COUNT (DRM_PVR_HEAP_TRANSFER_FRAG + 1)
+
+	igt_describe("Query, with one ioctl call, zero DRM PVR heaps");
+	igt_subtest("heap-info-get-1-count-zero")
+	{
+		struct drm_pvr_heap heaps = { 0 };
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = DRM_PVR_OBJ_ARRAY(0, &heaps),
+		};
+
+		igt_assert(!query.heaps.count &&
+			   query.heaps.stride &&
+			   query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count ||
+			    query.heaps.stride != sizeof(heaps) ||
+			    query.heaps.array != (uintptr_t)&heaps);
+	}
+
+	igt_describe("Query, with one ioctl call, one heap using an invalid stride");
+	igt_subtest("heap-info-get-1-stride-too-small")
+	{
+		struct drm_pvr_heap heaps = { 0 };
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = DRM_PVR_OBJ_ARRAY(1, &heaps),
+		};
+
+		query.heaps.stride = 1;
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, EINVAL);
+	}
+
+	igt_describe("Query, with one ioctl call, all heaps known to userspace");
+	igt_subtest("heap-info-get-1")
+	{
+		struct drm_pvr_heap heaps[DRM_PVR_HEAP_COUNT] = { 0 };
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = DRM_PVR_OBJ_ARRAY(ARRAY_SIZE(heaps), heaps),
+		};
+
+		igt_assert(DRM_PVR_HEAP_COUNT == ARRAY_SIZE(heaps));
+		igt_assert(query.heaps.count == DRM_PVR_HEAP_COUNT &&
+			   query.heaps.stride == sizeof(*heaps) &&
+			   query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count > DRM_PVR_HEAP_COUNT ||
+			    query.heaps.stride != sizeof(*heaps) ||
+			    query.heaps.array != (uintptr_t)heaps);
+	}
+
+	igt_describe("Query, with one ioctl call, the legacy value of stride and count");
+	igt_subtest("heap-info-get-1-legacy")
+	{
+		struct drm_pvr_dev_query_heap_info query = { 0 };
+		struct drm_pvr_heap *heaps = NULL;
+
+		igt_assert(!query.heaps.count &&
+			   !query.heaps.stride &&
+			   !query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count != LEGACY_COUNT ||
+			    query.heaps.stride != LEGACY_STRIDE ||
+			    query.heaps.array);
+	}
+
+	igt_describe("Query, with two ioctl calls, all heaps known to the kernel");
+	igt_subtest("heap-info-get-2")
+	{
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = { .stride = ~0U, .count = ~0U, },
+		};
+		uint32_t ioctl1_count = ~0U, ioctl1_stride = ~0U;
+		struct drm_pvr_heap *heaps = NULL;
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   !query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count == ~0U ||
+			    query.heaps.stride == ~0U ||
+			    query.heaps.array);
+
+		ioctl1_stride = query.heaps.stride;
+		ioctl1_count = query.heaps.count;
+
+		heaps = calloc(ioctl1_count, ioctl1_stride);
+		igt_fail_on(!heaps);
+
+		query.heaps = (struct drm_pvr_obj_array)
+			DRM_PVR_OBJ_ARRAY(query.heaps.count, heaps);
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count != ioctl1_count ||
+			    query.heaps.stride != ioctl1_stride ||
+			    query.heaps.array != (uintptr_t)heaps);
+
+		free(heaps);
+	}
+
+	igt_describe("Query, with two ioctl calls, the legacy value of stride and count");
+	igt_subtest("heap-info-get-2-legacy")
+	{
+		struct drm_pvr_dev_query_heap_info query = { 0 };
+		struct drm_pvr_heap *heaps = NULL;
+
+		igt_assert(!query.heaps.count &&
+			   !query.heaps.stride &&
+			   !query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count != LEGACY_COUNT ||
+			    query.heaps.stride != LEGACY_STRIDE ||
+			    query.heaps.array);
+
+		heaps = calloc(query.heaps.count, sizeof(*heaps));
+		igt_fail_on(!heaps);
+
+		query.heaps = (struct drm_pvr_obj_array)
+			DRM_PVR_OBJ_ARRAY(query.heaps.count, heaps);
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count != LEGACY_COUNT ||
+			    query.heaps.stride != LEGACY_STRIDE ||
+			    query.heaps.array != (uintptr_t)heaps);
+
+		free(heaps);
+	}
+
+	igt_describe("Query, with two ioctl calls, heaps where UMD(count) < KMD(count)");
+	igt_subtest("heap-info-get-2-count-umd-lt-kmd")
+	{
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = { .stride = ~0U, .count = ~0U, },
+		};
+		uint32_t umd_count, kmd_count;
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   !query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count == ~0U ||
+			    query.heaps.stride == ~0U ||
+			    query.heaps.array);
+
+		kmd_count = query.heaps.count;
+		umd_count = kmd_count - 1;
+
+		igt_assert(kmd_count && umd_count < kmd_count);
+
+		for (uint32_t count = umd_count; count; count--) {
+			struct drm_pvr_heap *heaps = calloc(count, sizeof(*heaps));
+			query = (struct drm_pvr_dev_query_heap_info){
+				.heaps = DRM_PVR_OBJ_ARRAY(count, heaps),
+			};
+
+			igt_assert(query.heaps.count < kmd_count &&
+				   query.heaps.stride &&
+				   query.heaps.array);
+
+			igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+						sizeof(query), &query, 0);
+
+			igt_fail_on(query.heaps.count != count ||
+				    query.heaps.stride != sizeof(*heaps) ||
+				    query.heaps.array != (uintptr_t)heaps);
+
+			free(heaps);
+		}
+	}
+
+	igt_describe("Query, with two ioctl calls, heaps where UMD(count) > KMD(count)");
+	igt_subtest("heap-info-get-2-count-umd-gt-kmd")
+	{
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = { .stride = ~0U, .count = ~0U, },
+		};
+		uint32_t umd_count, kmd_count;
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   !query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count == ~0U ||
+			    query.heaps.stride == ~0U ||
+			    query.heaps.array);
+
+		kmd_count = query.heaps.count;
+		umd_count = kmd_count * 2;
+
+		igt_assert(kmd_count && umd_count > kmd_count);
+
+		for (uint32_t count = umd_count; count > kmd_count; count--) {
+			struct drm_pvr_heap *heaps = calloc(count, sizeof(*heaps));
+			query = (struct drm_pvr_dev_query_heap_info){
+				.heaps = DRM_PVR_OBJ_ARRAY(count, heaps),
+			};
+
+			igt_assert(query.heaps.count > kmd_count &&
+				   query.heaps.stride &&
+				   query.heaps.array);
+
+			igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+						sizeof(query), &query, 0);
+
+			igt_fail_on(query.heaps.count != kmd_count ||
+				    query.heaps.stride != sizeof(*heaps) ||
+				    query.heaps.array != (uintptr_t)heaps);
+
+			free(heaps);
+		}
+	}
+
+	igt_describe("Query, with two ioctl calls, heaps where UMD(stride) > KMD(stride)");
+	igt_subtest("heap-info-get-2-stride-umd-gt-kmd")
+	{
+		struct drm_pvr_dev_query_heap_info query = {
+			.heaps = { .stride = ~0U, .count = ~0U, },
+		};
+		struct drm_pvr_heap heaps = { 0 };
+		uint32_t umd_stride, kmd_stride;
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride &&
+			   !query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count == ~0U ||
+			    query.heaps.stride == ~0U ||
+			    query.heaps.array);
+
+		kmd_stride = query.heaps.stride;
+		umd_stride = ALIGN(kmd_stride + 1, sizeof(uint64_t));
+
+		igt_assert(kmd_stride && umd_stride > kmd_stride);
+
+		query = (struct drm_pvr_dev_query_heap_info){
+			.heaps = {
+				.count = 1,
+				.stride = umd_stride,
+				.array = (uintptr_t)&heaps,
+			},
+		};
+
+		igt_assert(query.heaps.count &&
+			   query.heaps.stride > kmd_stride &&
+			   query.heaps.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_HEAP_INFO_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.heaps.count != 1 ||
+			    query.heaps.stride != umd_stride ||
+			    query.heaps.array != (uintptr_t)&heaps);
+	}
+
+#undef LEGACY_STRIDE
+#undef LEGACY_COUNT
+
+	/***********************************************************************
+	   DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET
+	 ***********************************************************************/
+
 	igt_describe("Test validity of static data areas");
 	igt_subtest("heap-info-static-data-areas-valid")
 	{
@@ -161,6 +468,284 @@ int igt_main()
 		free(heaps);
 		free(static_data_areas);
 	}
+
+/* Value of stride and count as defined in the first released version of the UAPI. */
+#define LEGACY_STRIDE (offsetof(struct drm_pvr_static_data_area, offset) + sizeof(areas->offset))
+#define LEGACY_COUNT (5U)
+
+	igt_describe("Query, with one ioctl call, zero static areas");
+	igt_subtest("heap-info-static-data-areas-get-1-count-zero")
+	{
+		struct drm_pvr_static_data_area areas = { 0 };
+		struct drm_pvr_dev_query_static_data_areas query = {
+			.static_data_areas = DRM_PVR_OBJ_ARRAY(0, &areas),
+		};
+
+		igt_assert(!query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count ||
+			    query.static_data_areas.stride != sizeof(areas) ||
+			    query.static_data_areas.array != (uintptr_t)&areas);
+	}
+
+	igt_describe("Query, with one ioctl call, one static area using an invalid stride");
+	igt_subtest("heap-info-static-data-areas-get-1-stride-too-small")
+	{
+		struct drm_pvr_static_data_area areas = { 0 };
+		struct drm_pvr_dev_query_static_data_areas query = {
+			.static_data_areas = DRM_PVR_OBJ_ARRAY(1, &areas),
+		};
+
+		query.static_data_areas.stride = 1;
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, EINVAL);
+	}
+
+	igt_describe("Query, with one ioctl call, the legacy value of stride and count");
+	igt_subtest("heap-info-static-data-areas-get-1-legacy")
+	{
+		struct drm_pvr_dev_query_static_data_areas query = { 0 };
+		struct drm_pvr_static_data_area *areas = NULL;
+
+		igt_assert(!query.static_data_areas.count &&
+			   !query.static_data_areas.stride &&
+			   !query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count != LEGACY_COUNT ||
+			    query.static_data_areas.stride != LEGACY_STRIDE ||
+			    query.static_data_areas.array);
+	}
+
+	igt_describe("Query, with two ioctl calls, all static areas known to the kernel");
+	igt_subtest("heap-info-static-data-areas-get-2")
+	{
+		struct drm_pvr_dev_query_static_data_areas query = {
+			.static_data_areas = { .stride = ~0U, .count = ~0U, },
+		};
+		uint32_t ioctl1_count = ~0U, ioctl1_stride = ~0U;
+		struct drm_pvr_static_data_area *areas = NULL;
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   !query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.stride == ~0U ||
+			    query.static_data_areas.count == ~0U ||
+			    query.static_data_areas.array);
+
+		ioctl1_stride = query.static_data_areas.stride;
+		ioctl1_count = query.static_data_areas.count;
+
+		areas = calloc(ioctl1_count, ioctl1_stride);
+		igt_fail_on(!areas);
+
+		query.static_data_areas = (struct drm_pvr_obj_array)
+			DRM_PVR_OBJ_ARRAY(query.static_data_areas.count, areas);
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count != ioctl1_count ||
+			    query.static_data_areas.stride != ioctl1_stride ||
+			    query.static_data_areas.array != (uintptr_t)areas);
+
+		free(areas);
+	}
+
+	igt_describe("Query, with two ioctl calls, the legacy value of stride and count");
+	igt_subtest("heap-info-static-data-areas-get-2-legacy")
+	{
+		struct drm_pvr_dev_query_static_data_areas query = { 0 };
+		struct drm_pvr_static_data_area *areas = NULL;
+
+		igt_assert(!query.static_data_areas.count &&
+			   !query.static_data_areas.stride &&
+			   !query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count != LEGACY_COUNT ||
+			    query.static_data_areas.stride != LEGACY_STRIDE ||
+			    query.static_data_areas.array);
+
+		areas = calloc(query.static_data_areas.count, sizeof(*areas));
+		igt_fail_on(!areas);
+
+		query.static_data_areas = (struct drm_pvr_obj_array)
+			DRM_PVR_OBJ_ARRAY(query.static_data_areas.count, areas);
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count != LEGACY_COUNT ||
+			    query.static_data_areas.stride != LEGACY_STRIDE ||
+			    query.static_data_areas.array != (uintptr_t)areas);
+
+		free(areas);
+	}
+
+	igt_describe("Query, with two ioctl calls, static areas where UMD(count) < KMD(count)");
+	igt_subtest("heap-info-static-data-areas-get-2-count-umd-lt-kmd")
+	{
+		struct drm_pvr_dev_query_static_data_areas query = {
+			.static_data_areas = { .stride = ~0U, .count = ~0U, },
+		};
+		uint32_t umd_count, kmd_count;
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   !query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count == ~0U ||
+			    query.static_data_areas.stride == ~0U ||
+			    query.static_data_areas.array);
+
+		kmd_count = query.static_data_areas.count;
+		umd_count = kmd_count - 1;
+
+		igt_assert(kmd_count && umd_count < kmd_count);
+
+		for (uint32_t count = umd_count; count; count--) {
+			struct drm_pvr_static_data_area *areas = calloc(count, sizeof(*areas));
+			query = (struct drm_pvr_dev_query_static_data_areas){
+				.static_data_areas = DRM_PVR_OBJ_ARRAY(count, areas),
+			};
+
+			igt_assert(query.static_data_areas.count < kmd_count &&
+				   query.static_data_areas.stride &&
+				   query.static_data_areas.array);
+
+			igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+						sizeof(query), &query, 0);
+
+			igt_fail_on(query.static_data_areas.count != count ||
+				    query.static_data_areas.stride != sizeof(*areas) ||
+				    query.static_data_areas.array != (uintptr_t)areas);
+
+			free(areas);
+		}
+	}
+
+	igt_describe("Query, with two ioctl calls, static areas where UMD(count) > KMD(count)");
+	igt_subtest("heap-info-static-data-areas-get-2-count-umd-gt-kmd")
+	{
+		struct drm_pvr_dev_query_static_data_areas query = {
+			.static_data_areas = { .stride = ~0U, .count = ~0U, },
+		};
+		uint32_t umd_count, kmd_count;
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   !query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count == ~0U ||
+			    query.static_data_areas.stride == ~0U ||
+			    query.static_data_areas.array);
+
+		kmd_count = query.static_data_areas.count;
+		umd_count = kmd_count * 2;
+
+		igt_assert(kmd_count && umd_count > kmd_count);
+
+		for (uint32_t count = umd_count; count > kmd_count; count--) {
+			struct drm_pvr_static_data_area *areas = calloc(count, sizeof(*areas));
+			query = (struct drm_pvr_dev_query_static_data_areas){
+				.static_data_areas = DRM_PVR_OBJ_ARRAY(count, areas),
+			};
+
+			igt_assert(query.static_data_areas.count > kmd_count &&
+				   query.static_data_areas.stride &&
+				   query.static_data_areas.array);
+
+			igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+						sizeof(query), &query, 0);
+
+			igt_fail_on(query.static_data_areas.count != kmd_count ||
+				    query.static_data_areas.stride != sizeof(*areas) ||
+				    query.static_data_areas.array != (uintptr_t)areas);
+
+			free(areas);
+		}
+	}
+
+	igt_describe("Query, with two ioctl calls, static areas where UMD(stride) > KMD(stride)");
+	igt_subtest("heap-info-static-data-areas-get-2-stride-umd-gt-kmd")
+	{
+		struct drm_pvr_dev_query_static_data_areas query = {
+			.static_data_areas = { .stride = ~0U, .count = ~0U, },
+		};
+		struct drm_pvr_static_data_area areas = { 0 };
+		uint32_t umd_stride, kmd_stride;
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride &&
+			   !query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count == ~0U ||
+			    query.static_data_areas.stride == ~0U ||
+			    query.static_data_areas.array);
+
+		kmd_stride = query.static_data_areas.stride;
+		umd_stride = ALIGN(kmd_stride + 1, sizeof(uint64_t));
+
+		igt_assert(kmd_stride && umd_stride > kmd_stride);
+
+		query = (struct drm_pvr_dev_query_static_data_areas){
+			.static_data_areas = {
+				.count = 1,
+				.stride = umd_stride,
+				.array = (uintptr_t)&areas,
+			},
+		};
+
+		igt_assert(query.static_data_areas.count &&
+			   query.static_data_areas.stride > kmd_stride &&
+			   query.static_data_areas.array);
+
+		igt_pvr_ioctl_dev_query(fd, DRM_PVR_DEV_QUERY_STATIC_DATA_AREAS_GET,
+					sizeof(query), &query, 0);
+
+		igt_fail_on(query.static_data_areas.count != 1 ||
+			    query.static_data_areas.stride != umd_stride ||
+			    query.static_data_areas.array != (uintptr_t)&areas);
+	}
+
+#undef LEGACY_STRIDE
+#undef LEGACY_COUNT
 
 	igt_fixture()
 	{
