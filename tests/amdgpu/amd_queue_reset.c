@@ -499,18 +499,12 @@ static bool
 is_queue_reset_tests_enable(const struct amdgpu_gpu_info *gpu_info, uint32_t version)
 {
 	bool enable = true;
-	const char *platform_name;
 
 	if (version < 9)
 		enable = false;
 
-	if (enable && amd_is_lockdep_enabled() &&
-		amd_platform_get_ops()->get_platform_name) {
-					amd_platform_get_ops()->get_platform_name(gpu_info);
-			if (!strcmp(platform_name, "navi10") ||
-				!strcmp(platform_name, "vega20"))
-				enable = false;
-	}
+	if (enable && amd_is_lockdep_enabled())
+			enable = false;
 
 	return enable;
 }
