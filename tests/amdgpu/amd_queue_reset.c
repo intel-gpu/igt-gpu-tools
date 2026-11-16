@@ -26,6 +26,7 @@
 #include "lib/amdgpu/amd_deadlock_helpers.h"
 #include "lib/amdgpu/compute_utils/amd_dispatch.h"
 #include "lib/amdgpu/amdgpu_asic_addr.h"
+#include "lib/amdgpu/amd_platform.h"
 #include "lib/amdgpu/amd_utils.h"
 
 #define NUM_CHILD_PROCESSES 4
@@ -498,9 +499,18 @@ static bool
 is_queue_reset_tests_enable(const struct amdgpu_gpu_info *gpu_info, uint32_t version)
 {
 	bool enable = true;
+	const char *platform_name;
 
 	if (version < 9)
 		enable = false;
+
+	if (enable && amd_is_lockdep_enabled() &&
+		amd_platform_get_ops()->get_platform_name) {
+					amd_platform_get_ops()->get_platform_name(gpu_info);
+			if (!strcmp(platform_name, "navi10") ||
+				!strcmp(platform_name, "vega20"))
+				enable = false;
+	}
 
 	return enable;
 }
@@ -1252,6 +1262,7 @@ int igt_main()
 		igt_assert_eq(r, 0);
 
 		asic_rings_readness(device, 1, arr_cap);
+		amd_platform_filter_init(&gpu_info);
 		igt_skip_on(!is_queue_reset_tests_enable(&gpu_info, info[1].hw_ip_version_major));
 
 		if (!is_background_parameter_found(argc, argv)) {
