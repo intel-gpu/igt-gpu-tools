@@ -112,3 +112,8 @@ igt@xe_live_ktest@xe_eudebug
 igt@xe_mempage_offline@inject-single-page
 igt@xe_mempage_offline@inject-duplicate-page
 ##################################################################
+# Valid Skip: SCRATCH_PAGE + FAULT_MODE not supported on Xe3+
+# and rejected by KMD
+##################################################################
+igt@xe_vm@single-op-map-mirror-over-bound
+##################################################################
