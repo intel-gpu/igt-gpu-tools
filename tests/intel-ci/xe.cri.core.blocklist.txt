@@ -75,3 +75,17 @@ igt@xe_pat@xa-app-transient-media-(off|on)
 ####################################################################
 igt@xe_module_load@load
 ####################################################################
+# Valid skip: when eviction footprtint > 50 % of RAM
+##################################################################
+igt@xe_vm@overcommit.*
+##################################################################
+# Valid skip: Current CRI systems CPU-visible (vram_bar_size)
+# is set to total vram as default
+#################################################################
+igt@xe_mmap@small-bar
+##################################################################
+# Valid Skip: SCRATCH_PAGE + FAULT_MODE not supported on Xe3+
+# and rejected by KMD
+##################################################################
+igt@xe_vm@single-op-map-mirror-over-bound
+#################################################################
