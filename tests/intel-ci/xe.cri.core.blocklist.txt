@@ -53,6 +53,9 @@ igt@xe_compute_preempt@compute-threadgroup-preempt
 igt@xe_compute@ccs-mode-basic
 igt@xe_compute@ccs-mode-compute-kernel
 igt@xe_compute@eu-busy-10s
+igt@xe_eudebug_online@breakpoint-many-sessions-single-tile
+igt@xe_eudebug_online@breakpoint-many-contexts
+igt@xe_eudebug_online@interrupt-one-of-many-contexts
 ##################################################################
 # Valid Skip: Not applicable for single tile platform
 ##################################################################
