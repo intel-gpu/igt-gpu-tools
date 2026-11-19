@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "igt.h"
+#include "igt_sysfs.h"
 #include "intel_pat.h"
 #include "lib/igt_syncobj.h"
 #include "lib/intel_compute.h"
@@ -2668,6 +2669,7 @@ int igt_main()
 
 	igt_fixture() {
 		struct xe_device *xe;
+		int dir;
 
 		fd = drm_open_driver(DRIVER_XE);
 		igt_require(!xe_supports_faults(fd));
@@ -2688,6 +2690,18 @@ int igt_main()
 			igt_debug("Couldn't get Xe PAT software configuration (%d)\n",
 				  num_pat_entries);
 			num_pat_entries = 0;
+		}
+
+		dir = igt_sysfs_drm_module_params_open();
+		if (dir >= 0) {
+			int debug_mask = igt_drm_debug_mask_get(dir);
+			unsigned int bit_to_clear = DRM_UT_DRIVER;
+
+			close(dir);
+			if (debug_mask > 0 && (debug_mask & bit_to_clear)) {
+				igt_install_exit_handler(igt_drm_debug_mask_reset_exit_handler);
+				update_debug_mask_if_ci(debug_mask & ~bit_to_clear);
+			}
 		}
 	}
 
