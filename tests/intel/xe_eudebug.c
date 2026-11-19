@@ -2593,6 +2593,7 @@ static void vm_bind_clear_client(struct xe_eudebug_client *c)
 	struct xe_eudebug_private_data *data = c->data;
 	struct vm_bind_clear_priv *priv = data->vm_bind_priv;
 	int current = 0;
+	int n_threads = 0;
 	struct drm_xe_engine_class_instance *engine;
 	struct vm_bind_clear_thread_priv *threads;
 	uint64_t region;
@@ -2603,23 +2604,26 @@ static void vm_bind_clear_client(struct xe_eudebug_client *c)
 
 	xe_for_each_mem_region(fd, memreg, region) {
 		xe_eudebug_for_each_engine(fd, engine) {
-			threads[current].c = c;
-			threads[current].hwe = engine;
-			threads[current].region = region;
+			igt_assert(n_threads < count);
+			threads[n_threads].c = c;
+			threads[n_threads].hwe = engine;
+			threads[n_threads].region = region;
 
-			pthread_create(&threads[current].thread, NULL,
-				       vm_bind_clear_thread, &threads[current]);
-			current++;
+			igt_assert_eq(pthread_create(&threads[n_threads].thread, NULL,
+						     vm_bind_clear_thread,
+						     &threads[n_threads]), 0);
+			n_threads++;
 		}
 	}
 
-	for (current = 0; current < count; current++)
+	/* Only render/compute engines get a thread, join just those */
+	for (current = 0; current < n_threads; current++)
 		pthread_join(threads[current].thread, NULL);
 
 	xe_for_each_mem_region(fd, memreg, region) {
 		unsigned long sum = 0;
 
-		for (current = 0; current < count; current++)
+		for (current = 0; current < n_threads; current++)
 			if (threads[current].region == region)
 				sum += threads[current].sum;
 
