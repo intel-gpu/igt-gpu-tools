@@ -4,3 +4,16 @@
 ##################################################################
 igt@xe_exec_fault_mode@invalid-va
 igt@xe_exec_system_allocator@fault
+##################################################################
+# valid Skip: gpu health sysfs not supported for VFs
+##################################################################
+igt@xe_ras@gpu-health
+##################################################################
+#valid Skip: runtime pm is not supported on VM
+##################################################################
+igt@xe_pm@d3cold.*
+igt@xe_pm@d3hot.*
+igt@xe_pm@vram-d3cold-threshold
+igt@xe_pm@s3-d3cold-basic-exec
+igt@xe_pm@s4-d3(?:hot|cold)-basic-exec.*
+##################################################################
