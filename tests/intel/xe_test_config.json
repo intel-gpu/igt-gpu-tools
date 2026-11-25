@@ -11,7 +11,7 @@
                 "default-testlist": "FULL",
                 "update-from-file": {
                     "exclude-type": "regex-ignorecase",
-                    "append-value-if-not-excluded": "Xe FULL, Xe FULL VF, Xe FULL VM",
+                    "append-value-if-not-excluded": "Xe FULL, Xe FULL VF, Xe FULL VM, Xe DKMS FULL VM",
                     "include": [
                         { "Xe BAT, Xe BAT VF, Xe BAT VM": "../intel-ci/xe.fast-feedback.testlist" },
                         { "Xe premerge gating": "../intel-ci/xe.cri.premerge.testlist" }
@@ -19,7 +19,8 @@
                     "exclude": [
                         { "Xe BAT, Xe BAT VF, Xe BAT VM, Xe FULL, Xe FULL VF, Xe FULL VM": "../intel-ci/xe.blocklist.txt" },
                         { "Xe BAT VF, Xe FULL VF": "../intel-ci/xe.sriov-vf.blocklist.txt"},
-                        { "Xe BAT VM, Xe FULL VM": "../intel-ci/xe.sriov-vm.blocklist.txt"}
+                        { "Xe BAT VM, Xe FULL VM, Xe DKMS FULL VM": "../intel-ci/xe.sriov-vm.blocklist.txt"},
+                        { "Xe DKMS FULL VM": "../intel-ci/xe.dkms.sriov.vm.blocklist.txt" }
  		     ]
                 },
                 "order": [
