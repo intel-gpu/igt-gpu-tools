@@ -57,6 +57,7 @@ igt@xe_exec_compute_mode@twice-bindexecqueue
 igt@xe_exec_compute_mode@twice-bindexecqueue-rebind
 igt@xe_exec_compute_mode@twice-bindexecqueue-userptr
 igt@xe_exec_compute_mode@twice-bindexecqueue-userptr-invalidate
+igt@xe_exec_fault_mode@invalid-va
 igt@xe_exec_compute_mode@twice-bindexecqueue-userptr-rebind
 igt@xe_exec_compute_mode@twice-preempt-fence-early
 igt@xe_exec_compute_mode@twice-rebind
@@ -116,6 +117,7 @@ igt@xe_exec_reset@cm-close-fd-no-exec
 igt@xe_exec_reset@virtual-close-fd-no-exec
 igt@xe_exec_store@basic-store
 igt@xe_exec_system_allocator@eu-fault-2m-range-device-host
+igt@xe_exec_system_allocator@fault
 igt@xe_exec_system_allocator@madvise-atomic-inc
 igt@xe_exec_system_allocator@many-execqueues-free
 igt@xe_exec_system_allocator@many-execqueues-malloc
@@ -200,3 +202,18 @@ igt@xe_vm@shared-pte-page
 igt@xe_waitfence@abstime
 igt@xe_waitfence@engine
 igt@xe_waitfence@reltime
+igt@xe_eudebug@basic-connect
+igt@xe_eudebug@basic-read-event
+igt@xe_eudebug_online@basic-breakpoint
+igt@xe_eudebug_online@interrupt-all
+igt@xe_eudebug_online@interrupt-all-set-breakpoint
+igt@xe_eudebug_online@interrupt-all-set-breakpoint-faultable
+igt@xe_eudebug_online@resume-dss
+igt@xe_eudebug_online@resume-one
+igt@xe_eudebug_online@single-step
+igt@xe_eudebug_online@single-step-one
+igt@xe_exec_sip@invalidinstr-disabled
+igt@xe_exec_sip@invalidinstr-thread-enabled
+igt@xe_exec_sip@invalidinstr-walker-enabled
+igt@xe_exec_sip_eudebug@breakpoint-writesip
+igt@xe_exec_sip_eudebug@wait-writesip-nodebug
