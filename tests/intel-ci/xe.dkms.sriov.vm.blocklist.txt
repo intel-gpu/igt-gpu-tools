@@ -1,0 +1,18 @@
+#
+# Temporarily blocklist configfs, wedged, module reload/unload, and 
+# execqueue close-fd tests for Xe DKMS SR-IOV VM runs to unblock shard
+# execution
+#
+igt@xe_configfs@engines-allowed
+igt@xe_configfs@engines-allowed-invalid
+igt@xe_configfs@gt-types-allowed
+igt@xe_wedged@basic-wedged-read
+igt@xe_module_load@force-load
+igt@xe_module_load@many-reload
+igt@xe_module_load@reload
+igt@xe_module_load@reload-no-display
+igt@xe_module_load@unload
+igt@xe_exec_reset@virtual-close-execqueues-close-fd
+igt@xe_exec_reset@close-execqueues-close-fd
+igt@xe_exec_reset@cm-close-execqueues-close-fd
+igt@xe_exec_reset@parallel-close-execqueues-close-fd
